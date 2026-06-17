@@ -8,7 +8,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: PanelController?
 
     private let store = UserDefaultsSourceStore(defaults: .standard)
-    private lazy var settings = SettingsWindowController(store: store)
+    private let hotkeyStore = HotkeyStore(defaults: .standard)
+    private lazy var settings = SettingsWindowController(
+        store: store,
+        hotkeyStore: hotkeyStore,
+        defaultHotkey: defaultHotkey,
+        onHotkeyChanged: { [weak self] in self?.registerHotkey() }
+    )
+
+    // Default hotkey: ⌥D (key code + Carbon modifier mask, matched by code).
+    private let defaultHotkey = Hotkey(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey))
 
     // First-run defaults; thereafter the user's stored Sources win.
     private let defaultSources = [
@@ -48,11 +57,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.menu = menu
         statusItem = item
 
-        // Default hotkey: ⌥D. Matched by raw key code + modifiers, never the
-        // produced character (⌥D yields the dead key ∂).
+        registerHotkey()
+    }
+
+    /// (Re)register the global hotkey from the stored value, or the default.
+    /// Matched by raw key code + modifiers, never the produced character
+    /// (⌥D yields the dead key ∂).
+    private func registerHotkey() {
+        hotKey = nil // unregisters the previous one
+        let hotkey = hotkeyStore.load() ?? defaultHotkey
         hotKey = HotKeyMonitor(
-            keyCode: UInt32(kVK_ANSI_D),
-            modifiers: UInt32(optionKey)
+            keyCode: hotkey.keyCode,
+            modifiers: hotkey.modifiers
         ) { [weak self] in
             self?.trigger()
         }

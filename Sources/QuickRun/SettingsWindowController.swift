@@ -6,18 +6,31 @@ import QuickRunKit
 /// placeholder is rejected on commit.
 final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private let store: UserDefaultsSourceStore
+    private let hotkeyStore: HotkeyStore
+    private let defaultHotkey: Hotkey
+    private let onHotkeyChanged: () -> Void
     private var sources: [Source]
     private let window: NSWindow
     private let tableView = NSTableView()
+    private let hotkeyButton = NSButton()
+    private var recordMonitor: Any?
 
     private static let nameColumn = NSUserInterfaceItemIdentifier("name")
     private static let urlColumn = NSUserInterfaceItemIdentifier("url")
 
-    init(store: UserDefaultsSourceStore) {
+    init(
+        store: UserDefaultsSourceStore,
+        hotkeyStore: HotkeyStore,
+        defaultHotkey: Hotkey,
+        onHotkeyChanged: @escaping () -> Void
+    ) {
         self.store = store
+        self.hotkeyStore = hotkeyStore
+        self.defaultHotkey = defaultHotkey
+        self.onHotkeyChanged = onHotkeyChanged
         self.sources = store.load()
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 420),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -39,8 +52,21 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     // MARK: - UI
 
     private func buildUI() {
-        let content = NSView(frame: window.contentLayoutRect)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 392))
         content.autoresizingMask = [.width, .height]
+
+        let hotkeyLabel = NSTextField(labelWithString: "Global hotkey:")
+        hotkeyLabel.frame = NSRect(x: 12, y: 356, width: 100, height: 22)
+        hotkeyLabel.autoresizingMask = [.minYMargin]
+        content.addSubview(hotkeyLabel)
+
+        hotkeyButton.frame = NSRect(x: 116, y: 352, width: 180, height: 28)
+        hotkeyButton.autoresizingMask = [.minYMargin]
+        hotkeyButton.bezelStyle = .rounded
+        hotkeyButton.target = self
+        hotkeyButton.action = #selector(recordHotkey)
+        updateHotkeyButtonTitle()
+        content.addSubview(hotkeyButton)
 
         let scroll = NSScrollView(frame: NSRect(x: 12, y: 48, width: 576, height: 296))
         scroll.autoresizingMask = [.width, .height]
@@ -150,6 +176,32 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         store.replaceAll(sources)
         tableView.reloadData()
         tableView.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
+    }
+
+    // MARK: - Hotkey recorder
+
+    private func updateHotkeyButtonTitle() {
+        let hotkey = hotkeyStore.load() ?? defaultHotkey
+        hotkeyButton.title = HotkeyFormatter.display(hotkey)
+    }
+
+    @objc private func recordHotkey() {
+        hotkeyButton.title = "Press keys…"
+        recordMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            // Require at least one modifier so we don't bind a bare key globally.
+            let needed: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+            guard !event.modifierFlags.intersection(needed).isEmpty else { return nil }
+
+            self.hotkeyStore.save(HotkeyFormatter.hotkey(from: event))
+            self.updateHotkeyButtonTitle()
+            if let monitor = self.recordMonitor {
+                NSEvent.removeMonitor(monitor)
+                self.recordMonitor = nil
+            }
+            self.onHotkeyChanged()
+            return nil
+        }
     }
 
     private func alert(_ message: String) {
