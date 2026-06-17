@@ -14,10 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Source(name: "Google", urlTemplate: "https://www.google.com/search?q={q}"),
     ]
 
-    private lazy var capturer: SelectionCapturer = ClipboardSelectionCapturer(
-        pasteboard: SystemPasteboard(),
-        copy: SystemCopy.copySelection
-    )
+    // Accessibility first; fall back to a simulated copy + clipboard read.
+    private lazy var capturer: SelectionCapturer = ChainedSelectionCapturer([
+        AXSelectionCapturer(reader: SystemAccessibilityReader()),
+        ClipboardSelectionCapturer(
+            pasteboard: SystemPasteboard(),
+            copy: SystemCopy.copySelection
+        ),
+    ])
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
