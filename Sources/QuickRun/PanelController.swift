@@ -116,7 +116,12 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
 
         webViews.forEach { $0.removeFromSuperview() }
         webViews = sources.map { _ in
-            let webView = WKWebView(frame: webContainer.bounds)
+            // Allow audio (e.g. dictionary pronunciation) to play without a
+            // direct user-gesture: bing plays it after an async fetch, which
+            // would otherwise be blocked as autoplay.
+            let config = WKWebViewConfiguration()
+            config.mediaTypesRequiringUserActionForPlayback = []
+            let webView = WKWebView(frame: webContainer.bounds, configuration: config)
             webView.autoresizingMask = [.width, .height]
             webView.navigationDelegate = self
             webView.isHidden = true
