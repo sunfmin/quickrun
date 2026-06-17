@@ -35,6 +35,7 @@ assemble_app() {
 <dict>
   <key>CFBundleExecutable</key><string>$APP_NAME</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$SHORT_VERSION</string>
@@ -47,5 +48,10 @@ assemble_app() {
 PLIST
 
     printf 'APPL????' > "$app/Contents/PkgInfo"
+
+    if [ -f Resources/AppIcon.icns ]; then
+        cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+    fi
+
     APP_PATH="$app"
 }

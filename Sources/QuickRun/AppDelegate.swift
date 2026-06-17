@@ -39,7 +39,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.seedIfEmpty(defaultSources)
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "QR"
+        if let image = NSImage(systemSymbolName: "text.magnifyingglass", accessibilityDescription: "QuickRun") {
+            image.isTemplate = true
+            item.button?.image = image
+        } else {
+            item.button?.title = "QR"
+        }
         let menu = NSMenu()
         let settingsItem = NSMenuItem(
             title: "Settings…",
