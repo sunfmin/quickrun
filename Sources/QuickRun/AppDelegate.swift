@@ -7,8 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKeyMonitor?
     private var panel: PanelController?
 
-    // Hardcoded Sources for now; replaced by the SourceStore in a later slice.
-    private let sources = [
+    private let store = UserDefaultsSourceStore(defaults: .standard)
+    private lazy var settings = SettingsWindowController(store: store)
+
+    // First-run defaults; thereafter the user's stored Sources win.
+    private let defaultSources = [
         Source(name: "必应词典", urlTemplate: "https://cn.bing.com/dict/search?q={q}"),
         Source(name: "有道词典", urlTemplate: "https://dict.youdao.com/result?word={q}&lang=en"),
         Source(name: "Google", urlTemplate: "https://www.google.com/search?q={q}"),
@@ -24,9 +27,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ])
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        store.seedIfEmpty(defaultSources)
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "QR"
         let menu = NSMenu()
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(.separator())
         menu.addItem(
             withTitle: "Quit QuickRun",
             action: #selector(NSApplication.terminate(_:)),
@@ -45,10 +58,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func openSettings() {
+        settings.show()
+    }
+
     private func trigger() {
         let selection = capturer.capture() ?? ""
         let controller = panel ?? PanelController()
         panel = controller
-        controller.present(selection: selection, sources: sources)
+        controller.present(selection: selection, sources: store.load())
     }
 }
