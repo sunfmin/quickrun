@@ -34,6 +34,14 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     /// makes bing (and other UA-gated pages) serve the modern, working player.
     private static let safariUserAgentSuffix = "Version/17.4.1 Safari/605.1.15"
 
+    /// `UserDefaults` key (under `NSWindow Frame <name>`) where AppKit autosaves
+    /// the Panel's frame — its size and position survive across launches.
+    private static let frameAutosaveName = "QuickRunPanel"
+
+    /// True once the Panel has a frame to honour (a restored autosave, or a
+    /// first-run centering), so `present` stops re-centering after that.
+    private var hasPlacedPanel = false
+
     override init() {
         let frame = NSRect(x: 0, y: 0, width: 820, height: 620)
         panel = NSPanel(
@@ -73,6 +81,12 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
 
         panel.contentView = content
 
+        // Restore the last size/position, then let AppKit autosave further
+        // resizes and moves. A restored frame counts as placed, so present()
+        // won't recenter over the user's choice.
+        hasPlacedPanel = panel.setFrameUsingName(Self.frameAutosaveName)
+        panel.setFrameAutosaveName(Self.frameAutosaveName)
+
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel.isVisible, event.keyCode == 53 else { return event }
             self.dismiss()
@@ -97,7 +111,10 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         showActiveWebView()
         if let request { execute(request) }
 
-        panel.center()
+        if !hasPlacedPanel {
+            panel.center()
+            hasPlacedPanel = true
+        }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(queryField)
