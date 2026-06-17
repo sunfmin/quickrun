@@ -44,7 +44,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let selection = capturer.capture() ?? ""
         let controller = panel ?? PanelController()
         panel = controller
-        guard let url = try? URLBuilder.build(source: source, query: selection) else { return }
-        controller.show(url: url)
+        controller.present(selection: selection, source: source)
     }
 }
