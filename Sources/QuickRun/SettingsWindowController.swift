@@ -14,6 +14,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     private let tableView = NSTableView()
     private let hotkeyButton = NSButton()
     private var recordMonitor: Any?
+    private let permissionLabel = NSTextField(labelWithString: "")
 
     private static let nameColumn = NSUserInterfaceItemIdentifier("name")
     private static let urlColumn = NSUserInterfaceItemIdentifier("url")
@@ -44,6 +45,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     func show() {
         sources = store.load()
         tableView.reloadData()
+        updatePermissionStatus()
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -68,7 +70,20 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         updateHotkeyButtonTitle()
         content.addSubview(hotkeyButton)
 
-        let scroll = NSScrollView(frame: NSRect(x: 12, y: 48, width: 576, height: 296))
+        permissionLabel.frame = NSRect(x: 12, y: 320, width: 380, height: 22)
+        permissionLabel.autoresizingMask = [.minYMargin]
+        content.addSubview(permissionLabel)
+
+        let grant = NSButton(frame: NSRect(x: 400, y: 316, width: 188, height: 28))
+        grant.title = "Open Accessibility Settings"
+        grant.bezelStyle = .rounded
+        grant.autoresizingMask = [.minYMargin, .minXMargin]
+        grant.target = self
+        grant.action = #selector(openPermissionPane)
+        content.addSubview(grant)
+        updatePermissionStatus()
+
+        let scroll = NSScrollView(frame: NSRect(x: 12, y: 48, width: 576, height: 260))
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
@@ -176,6 +191,18 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         store.replaceAll(sources)
         tableView.reloadData()
         tableView.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
+    }
+
+    // MARK: - Permission
+
+    private func updatePermissionStatus() {
+        let granted = AccessibilityPermission.isGranted
+        permissionLabel.stringValue = "Accessibility: " + (granted ? "granted ✓" : "not granted — required")
+        permissionLabel.textColor = granted ? .secondaryLabelColor : .systemRed
+    }
+
+    @objc private func openPermissionPane() {
+        AccessibilityPermission.openSettingsPane()
     }
 
     // MARK: - Hotkey recorder

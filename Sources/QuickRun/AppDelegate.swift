@@ -58,6 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
 
         registerHotkey()
+
+        // First-run: ask for Accessibility so capture and the hotkey can work.
+        if !AccessibilityPermission.isGranted {
+            AccessibilityPermission.prompt()
+        }
     }
 
     /// (Re)register the global hotkey from the stored value, or the default.
@@ -79,9 +84,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func trigger() {
+        guard AccessibilityPermission.isGranted else {
+            presentPermissionNeeded()
+            return
+        }
         let selection = capturer.capture() ?? ""
         let controller = panel ?? PanelController()
         panel = controller
         controller.present(selection: selection, sources: store.load())
+    }
+
+    private func presentPermissionNeeded() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "QuickRun needs Accessibility permission"
+        alert.informativeText = "Grant Accessibility access so QuickRun can read the selected text and use the global hotkey."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            AccessibilityPermission.openSettingsPane()
+        }
     }
 }
