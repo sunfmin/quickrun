@@ -27,6 +27,13 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
 
     private let topInset: CGFloat = 70
 
+    /// Appended to each web view's User-Agent so it contains the "Safari" token.
+    /// 必应词典 sniffs the UA: browsers it recognises as Safari get an HTML5
+    /// pronunciation player, everything else gets a dead Flash <object>. WKWebView's
+    /// default UA lacks this token, so the speaker was silent. Presenting as Safari
+    /// makes bing (and other UA-gated pages) serve the modern, working player.
+    private static let safariUserAgentSuffix = "Version/17.4.1 Safari/605.1.15"
+
     override init() {
         let frame = NSRect(x: 0, y: 0, width: 820, height: 620)
         panel = NSPanel(
@@ -116,10 +123,11 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
 
         webViews.forEach { $0.removeFromSuperview() }
         webViews = sources.map { _ in
-            // Allow audio (e.g. dictionary pronunciation) to play without a
-            // direct user-gesture: bing plays it after an async fetch, which
-            // would otherwise be blocked as autoplay.
             let config = WKWebViewConfiguration()
+            // Present as Safari so UA-sniffing pages (e.g. 必应词典's
+            // pronunciation) serve their HTML5 player instead of a dead Flash one.
+            config.applicationNameForUserAgent = Self.safariUserAgentSuffix
+            // Allow audio that plays after an async step (no direct user gesture).
             config.mediaTypesRequiringUserActionForPlayback = []
             let webView = WKWebView(frame: webContainer.bounds, configuration: config)
             webView.autoresizingMask = [.width, .height]
