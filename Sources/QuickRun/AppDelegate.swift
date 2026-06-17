@@ -7,11 +7,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKeyMonitor?
     private var panel: PanelController?
 
-    // Walking skeleton: a single hardcoded Source. Replaced by the SourceStore later.
-    private let source = Source(
-        name: "必应词典",
-        urlTemplate: "https://cn.bing.com/dict/search?q={q}"
-    )
+    // Hardcoded Sources for now; replaced by the SourceStore in a later slice.
+    private let sources = [
+        Source(name: "必应词典", urlTemplate: "https://cn.bing.com/dict/search?q={q}"),
+        Source(name: "有道词典", urlTemplate: "https://dict.youdao.com/result?word={q}&lang=en"),
+        Source(name: "Google", urlTemplate: "https://www.google.com/search?q={q}"),
+    ]
 
     private lazy var capturer: SelectionCapturer = ClipboardSelectionCapturer(
         pasteboard: SystemPasteboard(),
@@ -44,6 +45,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let selection = capturer.capture() ?? ""
         let controller = panel ?? PanelController()
         panel = controller
-        controller.present(selection: selection, source: source)
+        controller.present(selection: selection, sources: sources)
     }
 }
