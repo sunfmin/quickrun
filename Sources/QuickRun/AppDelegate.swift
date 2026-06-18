@@ -93,6 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             presentPermissionNeeded()
             return
         }
+        // When QuickRun itself is frontmost, the system selection lives inside our
+        // own Panel. Read it straight from the active web view (no synthetic ⌘C,
+        // which the still-held hotkey modifiers would corrupt into a beep).
+        if NSApp.isActive, let controller = panel, controller.isVisible {
+            controller.lookUpSelectionInActiveWebView()
+            return
+        }
         let selection = capturer.capture() ?? ""
         let controller = panel ?? PanelController()
         panel = controller

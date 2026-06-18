@@ -129,6 +129,29 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         isDismissing = false
     }
 
+    /// Whether the Panel is currently on screen.
+    var isVisible: Bool { panel.isVisible }
+
+    /// Look up whatever text is selected inside the active web view (used when the
+    /// hotkey fires while QuickRun is already frontmost). Reads the selection via
+    /// JavaScript — no synthetic copy — so it can't beep or pick up the wrong text.
+    /// With nothing selected it just refocuses the Query field.
+    func lookUpSelectionInActiveWebView() {
+        let active = viewModel?.activeIndex ?? 0
+        guard webViews.indices.contains(active) else { return }
+        webViews[active].evaluateJavaScript("window.getSelection().toString()") { [weak self] result, _ in
+            guard let self else { return }
+            let text = (result as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !text.isEmpty else {
+                self.panel.makeFirstResponder(self.queryField)
+                self.queryField.selectText(nil)
+                return
+            }
+            self.queryField.stringValue = text
+            self.submit()
+        }
+    }
+
     // MARK: - Setup
 
     /// Build the tab bar and one WKWebView per Source. Rebuilt only when the set
