@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editor: EditorWindowController?
 
     private let regionCapturer: RegionCapturer = ScreenCaptureRegionCapturer()
+    private let textRecognizer: TextRecognizing = VisionTextRecognizer()
 
     private let store = UserDefaultsSourceStore(defaults: .standard)
     private let hotkeyStore = HotkeyStore(defaults: .standard)
@@ -123,9 +124,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let image else { return }
             let editor = EditorWindowController(image: image)
             editor.onClosed = { [weak self] in self?.editor = nil }
+            editor.onLookUp = { [weak self] word in self?.lookUp(word) }
             self.editor = editor
             editor.show()
+
+            // OCR off the main thread, then fill the Recognized-word list.
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                let lines = self.textRecognizer.recognizedLines(in: image)
+                let words = RecognizedWordExtractor.words(from: lines)
+                DispatchQueue.main.async { editor.setRecognizedWords(words) }
+            }
         }
+    }
+
+    /// Look up a Recognized word in the Panel. The Panel is persistent here so it
+    /// coexists with the Editor instead of vanishing when the Editor regains focus.
+    private func lookUp(_ query: String) {
+        let controller = panel ?? PanelController()
+        controller.onOpenSettings = { [weak self] in self?.openSettings() }
+        panel = controller
+        controller.present(selection: query, sources: store.load(), persistent: true)
     }
 
     private func presentPermissionNeeded() {

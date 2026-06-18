@@ -35,6 +35,11 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     /// the Settings window stays frontmost.
     private var suppressFocusRestore = false
 
+    /// A Panel summoned from a Capture coexists with the Editor, so it must not
+    /// vanish on losing key focus the way the classic hotkey HUD does. Esc and
+    /// an explicit dismiss still close it.
+    private var isPersistent = false
+
     /// Height of the translucent instrument bar (Query row + hairline + Source
     /// row + hairline) above the web content.
     private let topInset: CGFloat = 88
@@ -169,8 +174,9 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     /// Show the Panel for `sources`, seeding the Query from `selection`. A
     /// non-empty Selection loads the first tab; an empty one leaves the focused
     /// field blank with no navigation.
-    func present(selection: String, sources: [Source]) {
+    func present(selection: String, sources: [Source], persistent: Bool = false) {
         setupIfNeeded(for: sources)
+        isPersistent = persistent
         suppressFocusRestore = false
         previousApp = NSWorkspace.shared.frontmostApplication
         queryField.stringValue = selection
@@ -297,6 +303,7 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     // MARK: - NSWindowDelegate
 
     func windowDidResignKey(_ notification: Notification) {
+        guard !isPersistent else { return }
         dismiss()
     }
 }
