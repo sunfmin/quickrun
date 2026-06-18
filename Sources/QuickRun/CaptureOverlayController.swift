@@ -30,7 +30,12 @@ final class CaptureOverlayController: NSObject {
     private var toolbar: NSPanel?
     private var toolButtons: [MarkupTool: ToolButton] = [:]
     private let colorSwatch = SwatchButton(color: .sealRed, diameter: 22, target: nil, action: nil)
-    private let colorPopover = NSPopover()
+    // The colour palette as a borderless child of the overlay. An NSPopover sits
+    // below the shield-level overlay and never receives the click; a child panel
+    // (like the toolbar) does.
+    private var colorPanel: NSPanel?
+    private var colorPaletteVC: ColorPaletteViewController?
+    private var colorDismissMonitor: Any?
     private static let toolbarHeight: CGFloat = 44
     private static let toolbarGap: CGFloat = 12
 
@@ -181,15 +186,62 @@ final class CaptureOverlayController: NSObject {
     @objc private func cancelTapped() { close() }
 
     @objc private func showColorPopover() {
-        let current = viewModel.defaultStyle
-        let palette = ColorPaletteViewController(current: current.stroke) { [weak self] color in
+        if colorPanel != nil { hideColorPanel(); return }
+
+        let style = viewModel.defaultStyle
+        let palette = ColorPaletteViewController(current: style.stroke) { [weak self] color in
             guard let self else { return }
-            self.viewModel.setStyle(MarkupStyle(stroke: color, lineWidth: current.lineWidth, fontSize: current.fontSize))
+            self.viewModel.setStyle(MarkupStyle(stroke: color, lineWidth: style.lineWidth, fontSize: style.fontSize))
             self.refresh()
+            self.hideColorPanel()
         }
-        colorPopover.contentViewController = palette
-        colorPopover.behavior = .transient
-        colorPopover.show(relativeTo: colorSwatch.bounds, of: colorSwatch, preferredEdge: .maxY)
+        let content = palette.view
+        content.layoutSubtreeIfNeeded()
+        let size = content.fittingSize
+
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.contentView = content
+
+        window.addChildWindow(panel, ordered: .above)
+        colorPanel = panel
+        colorPaletteVC = palette
+        positionColorPanel(size: size)
+
+        // Dismiss on a click anywhere outside the palette.
+        colorDismissMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self, let panel = self.colorPanel else { return event }
+            if event.window !== panel { self.hideColorPanel() }
+            return event
+        }
+    }
+
+    /// Place the palette next to the toolbar's colour swatch — below it, or
+    /// above when there's no room — clamped to the display.
+    private func positionColorPanel(size: NSSize) {
+        guard let colorPanel, let swatchWindow = colorSwatch.window else { return }
+        let swatch = swatchWindow.convertToScreen(colorSwatch.convert(colorSwatch.bounds, to: nil))
+        let display = frozen.frame
+        var x = swatch.midX - size.width / 2
+        x = min(max(x, display.minX + 8), display.maxX - size.width - 8)
+        var y = swatch.minY - 8 - size.height
+        if y < display.minY + 8 { y = swatch.maxY + 8 }
+        y = min(y, display.maxY - size.height - 8)
+        colorPanel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func hideColorPanel() {
+        if let monitor = colorDismissMonitor { NSEvent.removeMonitor(monitor); colorDismissMonitor = nil }
+        if let colorPanel { window.removeChildWindow(colorPanel); colorPanel.orderOut(nil) }
+        colorPanel = nil
+        colorPaletteVC = nil
     }
 
     // MARK: - Terminal actions
@@ -227,6 +279,7 @@ final class CaptureOverlayController: NSObject {
     }
 
     private func close() {
+        hideColorPanel()
         // Un-parent every child (toolbar, and any looked-up Panel) so they
         // aren't tied to the overlay once it goes away.
         window.childWindows?.forEach { window.removeChildWindow($0) }
