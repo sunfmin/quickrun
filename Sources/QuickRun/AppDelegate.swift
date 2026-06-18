@@ -6,10 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var hotKey: HotKeyMonitor?
     private var panel: PanelController?
-    private var editor: EditorWindowController?
-
-    private let regionCapturer: RegionCapturer = ScreenCaptureRegionCapturer()
-    private let textRecognizer: TextRecognizing = VisionTextRecognizer()
+    private var overlay: CaptureOverlayController?
 
     private let store = UserDefaultsSourceStore(defaults: .standard)
     private let hotkeyStore = HotkeyStore(defaults: .standard)
@@ -119,34 +116,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.present(selection: selection, sources: store.load())
     }
 
-    /// Capture a screen region and open it in the Editor. A cancelled capture
-    /// (Esc) yields no image and simply returns the user to where they were.
+    /// Freeze the screen and open the in-place Editor overlay (ADR 0003). First
+    /// use needs Screen Recording permission; without it, guide the user the same
+    /// way the Accessibility prompt does and do nothing else.
     private func startCapture() {
-        regionCapturer.capture { [weak self] image in
-            guard let self, let image else { return }
-            let editor = EditorWindowController(image: image, saveLocation: self.saveLocationStore)
-            editor.onClosed = { [weak self] in self?.editor = nil }
-            editor.onLookUp = { [weak self] word in self?.lookUp(word) }
-            self.editor = editor
-            editor.show()
-
-            // OCR off the main thread, then fill the Recognized-word list.
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self else { return }
-                let lines = self.textRecognizer.recognizedLines(in: image)
-                let words = RecognizedWordExtractor.words(from: lines)
-                DispatchQueue.main.async { editor.setRecognizedWords(words) }
-            }
+        guard ScreenCapturePermission.isGranted else {
+            ScreenCapturePermission.request()
+            presentScreenRecordingNeeded()
+            return
+        }
+        DisplayFreezer.freezeDisplayUnderCursor { [weak self] frozen in
+            guard let self, let frozen else { return }
+            let overlay = CaptureOverlayController(frozen: frozen)
+            overlay.onClosed = { [weak self] in self?.overlay = nil }
+            self.overlay = overlay
+            overlay.show()
         }
     }
 
-    /// Look up a Recognized word in the Panel. The Panel is persistent here so it
-    /// coexists with the Editor instead of vanishing when the Editor regains focus.
-    private func lookUp(_ query: String) {
-        let controller = panel ?? PanelController()
-        controller.onOpenSettings = { [weak self] in self?.openSettings() }
-        panel = controller
-        controller.present(selection: query, sources: store.load(), persistent: true)
+    private func presentScreenRecordingNeeded() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "QuickRun needs Screen Recording permission"
+        alert.informativeText = "Grant Screen Recording access so QuickRun can freeze the screen to capture a region. You may need to quit and reopen QuickRun after granting."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            ScreenCapturePermission.openSettingsPane()
+        }
     }
 
     private func presentPermissionNeeded() {
