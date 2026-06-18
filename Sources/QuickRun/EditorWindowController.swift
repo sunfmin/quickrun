@@ -264,25 +264,26 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         colorSwatch.action = #selector(showColorPopover)
         colorSwatch.toolTip = "Stroke colour"
 
-        let leading = NSStackView(views: toolViews + [divider(), undo, redo, delete, divider(), colorSwatch])
-        leading.orientation = .horizontal
-        leading.spacing = 8
-        leading.translatesAutoresizingMaskIntoConstraints = false
-
         let copy = makeButton(symbol: "doc.on.doc", tooltip: "Copy to clipboard", action: #selector(copyTapped))
         let save = makeButton(symbol: "square.and.arrow.down", tooltip: "Save to folder", action: #selector(saveTapped))
-        let trailing = NSStackView(views: [copy, save])
-        trailing.orientation = .horizontal
-        trailing.spacing = 8
-        trailing.translatesAutoresizingMaskIntoConstraints = false
 
-        bar.addSubview(leading)
-        bar.addSubview(trailing)
+        // A spacer that absorbs all slack keeps the export group flush right and
+        // the tools flush left — they can never collide on a narrow toolbar.
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: toolViews + [divider(), undo, redo, delete, divider(), colorSwatch, spacer, copy, save])
+        row.orientation = .horizontal
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        bar.addSubview(row)
         NSLayoutConstraint.activate([
-            leading.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 14),
-            leading.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            trailing.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -14),
-            trailing.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            row.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 14),
+            row.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -14),
+            row.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
         ])
         return bar
     }
