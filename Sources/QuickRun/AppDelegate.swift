@@ -128,17 +128,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.lookUpSelectionInActiveWebView()
             return
         }
-        let selection = capturer.capture() ?? ""
-        // Nothing selected: there is no word to look up, so capture a screen
-        // region instead of opening a Panel to type into.
-        guard !selection.isEmpty else {
+        // The pure router decides the destination: nothing usable selected means
+        // capture a screen region; otherwise open the Panel on the trimmed Query.
+        switch LookupRouter.route(selection: capturer.capture()) {
+        case .capture:
             startCapture()
-            return
+        case .panel(let query):
+            let controller = panel ?? PanelController()
+            controller.onOpenSettings = { [weak self] in self?.openSettings() }
+            panel = controller
+            controller.present(selection: query, sources: store.load())
         }
-        let controller = panel ?? PanelController()
-        controller.onOpenSettings = { [weak self] in self?.openSettings() }
-        panel = controller
-        controller.present(selection: selection, sources: store.load())
     }
 
     /// Freeze the screen and open the in-place Editor overlay (ADR 0003). First
