@@ -29,32 +29,15 @@ final class VisionTextRecognizer: TextRecognizing {
             guard let candidate = observation.topCandidates(1).first else { continue }
             let string = candidate.string
             // Shared segmentation (ICU + symbol split) so a path's segments are
-            // each their own word; boxes come from each segment's range.
+            // each their own word. Vision reports a box per line but not reliably
+            // per sub-word — its per-range box tends to span the whole line/token,
+            // merging adjacent words' highlights — so each word's box is sliced
+            // from the line box by character position instead.
             for segment in RecognizedWordExtractor.segments(in: string) {
-                let box = Self.wordBox(for: segment.range, in: string, candidate: candidate, lineBox: observation.boundingBox)
+                let box = RecognizedWordExtractor.wordBox(in: observation.boundingBox, line: string, range: segment.range)
                 result.append(OCRObservation(text: segment.text, box: box))
             }
         }
         return result
-    }
-
-    /// The box for the word at `range`, normalized to the image (bottom-left
-    /// origin). Prefers Vision's precise per-substring box; when that can't be
-    /// derived, slices the line box by the word's character span rather than
-    /// returning the whole line — so a word's hit area never swallows its
-    /// neighbours (and is exact for monospace text like a terminal).
-    private static func wordBox(for range: Range<String.Index>, in string: String,
-                                candidate: VNRecognizedText, lineBox: CGRect) -> CGRect {
-        if let observation = try? candidate.boundingBox(for: range) {
-            return observation.boundingBox
-        }
-        let total = string.count
-        guard total > 0 else { return lineBox }
-        let start = string.distance(from: string.startIndex, to: range.lowerBound)
-        let length = string.distance(from: range.lowerBound, to: range.upperBound)
-        return CGRect(x: lineBox.minX + CGFloat(start) / CGFloat(total) * lineBox.width,
-                      y: lineBox.minY,
-                      width: CGFloat(length) / CGFloat(total) * lineBox.width,
-                      height: lineBox.height)
     }
 }

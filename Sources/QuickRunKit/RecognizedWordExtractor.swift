@@ -69,6 +69,32 @@ public enum RecognizedWordExtractor {
         }
     }
 
+    /// The on-image box for the word at `range` of `line`, derived as a
+    /// character-proportional slice of the line's box `lineBox` (normalized,
+    /// bottom-left origin). OCR engines often report a box per line but not per
+    /// sub-word, so slicing by character position gives every word a distinct,
+    /// non-overlapping box — without it, a path's segments and adjacent CJK
+    /// words share one box and their highlights merge into a block. CJK
+    /// ideographs count double, matching their rendered width, so mixed
+    /// CJK/Latin lines slice closer to reality.
+    public static func wordBox(in lineBox: CGRect, line: String, range: Range<String.Index>) -> CGRect {
+        let widths = line.map(characterWidth)
+        let total = widths.reduce(0, +)
+        guard total > 0 else { return lineBox }
+        let startOffset = line.distance(from: line.startIndex, to: range.lowerBound)
+        let endOffset = line.distance(from: line.startIndex, to: range.upperBound)
+        let before = widths[0..<startOffset].reduce(0, +)
+        let span = widths[startOffset..<endOffset].reduce(0, +)
+        return CGRect(x: lineBox.minX + before / total * lineBox.width,
+                      y: lineBox.minY,
+                      width: span / total * lineBox.width,
+                      height: lineBox.height)
+    }
+
+    private static func characterWidth(_ character: Character) -> CGFloat {
+        character.unicodeScalars.contains(where: isCJK) ? 2 : 1
+    }
+
     /// Turn word-level OCR observations into the clickable Recognized words drawn
     /// on the Capture, keeping each word's box. The same noise filter as
     /// `words(from:)` decides which become clickable — pure numbers and lone

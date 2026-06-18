@@ -81,4 +81,30 @@ final class RecognizedWordExtractorTests: XCTestCase {
             XCTAssertEqual(String(line[segment.range]), segment.text)
         }
     }
+
+    // MARK: - Per-word boxes (sliced from the line box, so they don't merge)
+
+    private func box(of word: String, in line: String, lineBox: CGRect) -> CGRect {
+        let range = line.range(of: word)!
+        return RecognizedWordExtractor.wordBox(in: lineBox, line: line, range: range)
+    }
+
+    func testWordBoxesAreDistinctSlicesOfTheLine() {
+        let line = "ab cd"
+        let lineBox = CGRect(x: 0, y: 0, width: 1, height: 0.1) // 5 chars, width 1
+        let ab = box(of: "ab", in: line, lineBox: lineBox)
+        let cd = box(of: "cd", in: line, lineBox: lineBox)
+        XCTAssertEqual(ab, CGRect(x: 0, y: 0, width: 0.4, height: 0.1))   // chars 0..2 of 5
+        XCTAssertEqual(cd, CGRect(x: 0.6, y: 0, width: 0.4, height: 0.1)) // chars 3..5 of 5
+        XCTAssertFalse(ab.intersects(cd), "adjacent words must not share a box")
+    }
+
+    func testCJKCountsDoubleWidthWhenSlicing() {
+        let line = "中a"                                  // widths 2 + 1 = 3
+        let lineBox = CGRect(x: 0, y: 0, width: 3, height: 1)
+        let cjk = box(of: "中", in: line, lineBox: lineBox)
+        let latin = box(of: "a", in: line, lineBox: lineBox)
+        XCTAssertEqual(cjk, CGRect(x: 0, y: 0, width: 2, height: 1))
+        XCTAssertEqual(latin, CGRect(x: 2, y: 0, width: 1, height: 1))
+    }
 }
