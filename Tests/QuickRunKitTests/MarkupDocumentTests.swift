@@ -37,7 +37,7 @@ final class MarkupDocumentTests: XCTestCase {
         let a = rect(0, 0, 10, 10)
         doc.add(a)
         doc.move(id: a.id, by: CGSize(width: 5, height: 3))
-        XCTAssertEqual(doc.objects.first?.bounds, CGRect(x: 5, y: 3, width: 10, height: 10))
+        XCTAssertEqual(doc.objects.first?.kind, .rectangle(CGRect(x: 5, y: 3, width: 10, height: 10)))
     }
 
     func testUndoRestoresPreviousState() {
@@ -85,6 +85,33 @@ final class MarkupDocumentTests: XCTestCase {
         let doc = MarkupDocument()
         doc.remove(id: UUID()) // unknown id changes nothing
         XCTAssertFalse(doc.canUndo)
+    }
+
+    func testAddsAndUndoesEveryKind() {
+        let doc = MarkupDocument()
+        let kinds: [MarkupObject.Kind] = [
+            .rectangle(CGRect(x: 0, y: 0, width: 5, height: 5)),
+            .arrow(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 9, y: 9)),
+            .text("hi", CGRect(x: 1, y: 1, width: 8, height: 8)),
+            .freehand([CGPoint(x: 0, y: 0), CGPoint(x: 3, y: 3)]),
+            .highlight([CGPoint(x: 0, y: 0), CGPoint(x: 4, y: 0)]),
+        ]
+        for kind in kinds { doc.add(MarkupObject(kind: kind)) }
+        XCTAssertEqual(doc.objects.count, kinds.count)
+
+        for _ in kinds { doc.undo() }
+        XCTAssertTrue(doc.objects.isEmpty)
+
+        doc.redo()
+        XCTAssertEqual(doc.objects.first?.kind, kinds.first)
+    }
+
+    func testMoveTranslatesAnArrow() {
+        let doc = MarkupDocument()
+        let arrow = MarkupObject(kind: .arrow(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 4, y: 4)))
+        doc.add(arrow)
+        doc.move(id: arrow.id, by: CGSize(width: 2, height: 3))
+        XCTAssertEqual(doc.objects.first?.kind, .arrow(from: CGPoint(x: 2, y: 3), to: CGPoint(x: 6, y: 7)))
     }
 
     func testHitTestReturnsTopmostObject() {

@@ -17,14 +17,79 @@ extension NSColor {
 /// already set up so that one unit equals one point of capture space. Shared by
 /// the live Editor canvas and the flattening renderer so they never diverge.
 enum MarkupDrawing {
+    /// Highlighter stroke width and opacity in capture space — a wide, see-through
+    /// swipe regardless of the style's line width.
+    private static let highlightWidth: CGFloat = 18
+    private static let highlightAlpha: CGFloat = 0.35
+
     static func draw(_ object: MarkupObject) {
-        NSColor(object.style.stroke).setStroke()
+        let color = NSColor(object.style.stroke)
+        let width = CGFloat(object.style.lineWidth)
+        color.setStroke()
+
         switch object.kind {
         case .rectangle(let rect):
             let path = NSBezierPath(rect: rect.standardized)
-            path.lineWidth = CGFloat(object.style.lineWidth)
+            path.lineWidth = width
+            path.stroke()
+
+        case .arrow(let from, let to):
+            drawArrow(from: from, to: to, width: width, color: color)
+
+        case .text(let string, let rect):
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.boldSystemFont(ofSize: CGFloat(object.style.fontSize)),
+                .foregroundColor: color,
+            ]
+            string.draw(in: rect.standardized, withAttributes: attributes)
+
+        case .freehand(let points):
+            let path = strokePath(points)
+            path.lineWidth = width
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+
+        case .highlight(let points):
+            let path = strokePath(points)
+            path.lineWidth = highlightWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            color.withAlphaComponent(highlightAlpha).setStroke()
             path.stroke()
         }
+    }
+
+    private static func strokePath(_ points: [CGPoint]) -> NSBezierPath {
+        let path = NSBezierPath()
+        guard let first = points.first else { return path }
+        path.move(to: first)
+        for point in points.dropFirst() { path.line(to: point) }
+        return path
+    }
+
+    private static func drawArrow(from: CGPoint, to: CGPoint, width: CGFloat, color: NSColor) {
+        let shaft = NSBezierPath()
+        shaft.move(to: from)
+        shaft.line(to: to)
+        shaft.lineWidth = width
+        shaft.lineCapStyle = .round
+        shaft.stroke()
+
+        let angle = atan2(to.y - from.y, to.x - from.x)
+        let headLength = max(12, width * 4)
+        let spread = CGFloat.pi / 7
+        let left = CGPoint(x: to.x - headLength * cos(angle - spread),
+                           y: to.y - headLength * sin(angle - spread))
+        let right = CGPoint(x: to.x - headLength * cos(angle + spread),
+                            y: to.y - headLength * sin(angle + spread))
+        let head = NSBezierPath()
+        head.move(to: to)
+        head.line(to: left)
+        head.line(to: right)
+        head.close()
+        color.setFill()
+        head.fill()
     }
 }
 

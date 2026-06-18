@@ -19,14 +19,17 @@ public struct RGBAColor: Equatable {
     public static let sealRed = RGBAColor(red: 0.84, green: 0.27, blue: 0.24)
 }
 
-/// Stroke colour and width shared by Markup objects.
+/// Stroke colour and width shared by Markup objects, plus the type size used by
+/// text labels.
 public struct MarkupStyle: Equatable {
     public var stroke: RGBAColor
     public var lineWidth: Double
+    public var fontSize: Double
 
-    public init(stroke: RGBAColor = .sealRed, lineWidth: Double = 3) {
+    public init(stroke: RGBAColor = .sealRed, lineWidth: Double = 3, fontSize: Double = 28) {
         self.stroke = stroke
         self.lineWidth = lineWidth
+        self.fontSize = fontSize
     }
 }
 
@@ -41,6 +44,11 @@ public struct MarkupObject: Equatable, Identifiable {
 
     public enum Kind: Equatable {
         case rectangle(CGRect)
+        case arrow(from: CGPoint, to: CGPoint)
+        /// A text label and its frame in capture space (the glue measures the frame).
+        case text(String, CGRect)
+        case freehand([CGPoint])
+        case highlight([CGPoint])
     }
 
     public init(id: UUID = UUID(), kind: Kind, style: MarkupStyle = MarkupStyle()) {
@@ -51,19 +59,48 @@ public struct MarkupObject: Equatable, Identifiable {
 
     /// A copy translated by `offset`, used when dragging an object.
     public func translated(by offset: CGSize) -> MarkupObject {
+        let dx = offset.width, dy = offset.height
         var copy = self
         switch kind {
         case .rectangle(let rect):
-            copy.kind = .rectangle(rect.offsetBy(dx: offset.width, dy: offset.height))
+            copy.kind = .rectangle(rect.offsetBy(dx: dx, dy: dy))
+        case .arrow(let from, let to):
+            copy.kind = .arrow(from: CGPoint(x: from.x + dx, y: from.y + dy),
+                               to: CGPoint(x: to.x + dx, y: to.y + dy))
+        case .text(let string, let rect):
+            copy.kind = .text(string, rect.offsetBy(dx: dx, dy: dy))
+        case .freehand(let points):
+            copy.kind = .freehand(points.map { CGPoint(x: $0.x + dx, y: $0.y + dy) })
+        case .highlight(let points):
+            copy.kind = .highlight(points.map { CGPoint(x: $0.x + dx, y: $0.y + dy) })
         }
         return copy
     }
 
     /// Axis-aligned bounds in capture space, for hit-testing and selection.
+    /// Stroked kinds are outset by half the line width so thin marks stay easy
+    /// to click.
     public var bounds: CGRect {
+        let pad = CGFloat(style.lineWidth) / 2
         switch kind {
         case .rectangle(let rect):
+            return rect.standardized.insetBy(dx: -pad, dy: -pad)
+        case .arrow(let from, let to):
+            return Self.boundingBox([from, to]).insetBy(dx: -pad, dy: -pad)
+        case .text(_, let rect):
             return rect.standardized
+        case .freehand(let points), .highlight(let points):
+            return Self.boundingBox(points).insetBy(dx: -pad, dy: -pad)
         }
+    }
+
+    private static func boundingBox(_ points: [CGPoint]) -> CGRect {
+        guard let first = points.first else { return .zero }
+        var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
+        for point in points.dropFirst() {
+            minX = min(minX, point.x); maxX = max(maxX, point.x)
+            minY = min(minY, point.y); maxY = max(maxY, point.y)
+        }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 }

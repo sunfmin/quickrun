@@ -2,17 +2,20 @@ import AppKit
 import QuickRunKit
 
 /// Displays a Capture and the Markup over it, and turns mouse drags into Markup
-/// edits. It owns no model state of its own beyond the in-progress drag: the
-/// controller pushes `objects`/`selectedID`/`tool` in, and the canvas reports
-/// committed edits back out through its callbacks (one callback = one undo step).
-final class MarkupCanvasView: NSView {
+/// edits. It owns no model state beyond the in-progress drag: the controller
+/// pushes `objects`/`selectedID`/`tool`/`activeStyle` in, and the canvas reports
+/// committed edits back through callbacks (one callback = one undo step).
+final class MarkupCanvasView: NSView, NSTextFieldDelegate {
     var image: NSImage? { didSet { needsDisplay = true } }
     var objects: [MarkupObject] = [] { didSet { needsDisplay = true } }
     var selectedID: UUID? { didSet { needsDisplay = true } }
     var tool: MarkupTool = .select
+    /// Style used to preview the in-progress mark (the controller applies the
+    /// same style when it commits the object).
+    var activeStyle = MarkupStyle()
 
-    /// A rectangle was drawn (capture space).
-    var onAddRectangle: ((CGRect) -> Void)?
+    /// A mark was drawn (capture space). The controller adds it with `activeStyle`.
+    var onCommit: ((MarkupObject.Kind) -> Void)?
     /// An object was clicked (or empty space, `nil`).
     var onSelect: ((UUID?) -> Void)?
     /// The object `id` was dragged by `offset` (capture space).
@@ -20,9 +23,14 @@ final class MarkupCanvasView: NSView {
 
     // In-progress drag state.
     private var dragStart: CGPoint?
-    private var pendingRect: CGRect?
+    private var strokePoints: [CGPoint] = []
+    private var pendingKind: MarkupObject.Kind?
     private var movingID: UUID?
     private var moveOffset: CGSize = .zero
+
+    // In-progress text entry.
+    private var textField: NSTextField?
+    private var textOriginView: CGPoint?
 
     override var isFlipped: Bool { false } // capture space is bottom-left, like AppKit
 
@@ -65,14 +73,14 @@ final class MarkupCanvasView: NSView {
         for object in objects {
             MarkupDrawing.draw(object.id == movingID ? object.translated(by: moveOffset) : object)
         }
+        if let pendingKind {
+            MarkupDrawing.draw(MarkupObject(kind: pendingKind, style: activeStyle))
+        }
         NSGraphicsContext.restoreGraphicsState()
 
         if let selected = objects.first(where: { $0.id == selectedID }) {
             let shown = selected.id == movingID ? selected.translated(by: moveOffset) : selected
             drawSelectionHandles(around: toView(shown.bounds))
-        }
-        if let pendingRect {
-            drawRubberBand(toView(pendingRect.standardized))
         }
     }
 
@@ -84,22 +92,12 @@ final class MarkupCanvasView: NSView {
         outline.stroke()
     }
 
-    private func drawRubberBand(_ rect: CGRect) {
-        NSColor(RGBAColor.sealRed).withAlphaComponent(0.9).setStroke()
-        let path = NSBezierPath(rect: rect)
-        path.lineWidth = 1.5
-        path.setLineDash([5, 3], count: 2, phase: 0)
-        path.stroke()
-    }
-
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
-        let point = toCapture(convert(event.locationInWindow, from: nil))
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        let point = toCapture(viewPoint)
         switch tool {
-        case .rectangle:
-            dragStart = point
-            pendingRect = CGRect(origin: point, size: .zero)
         case .select:
             if let hit = objects.last(where: { $0.bounds.contains(point) }) {
                 onSelect?(hit.id)
@@ -111,19 +109,28 @@ final class MarkupCanvasView: NSView {
                 dragStart = nil
                 movingID = nil
             }
+        case .text:
+            beginText(at: viewPoint)
+        case .rectangle, .arrow, .freehand, .highlight:
+            dragStart = point
+            strokePoints = [point]
+            updatePending(to: point)
         }
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         let point = toCapture(convert(event.locationInWindow, from: nil))
-        guard let start = dragStart else { return }
         switch tool {
-        case .rectangle:
-            pendingRect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y),
-                                 width: abs(point.x - start.x), height: abs(point.y - start.y))
         case .select where movingID != nil:
-            moveOffset = CGSize(width: point.x - start.x, height: point.y - start.y)
+            if let start = dragStart {
+                moveOffset = CGSize(width: point.x - start.x, height: point.y - start.y)
+            }
+        case .freehand, .highlight:
+            strokePoints.append(point)
+            updatePending(to: point)
+        case .rectangle, .arrow:
+            updatePending(to: point)
         default:
             break
         }
@@ -132,19 +139,88 @@ final class MarkupCanvasView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         switch tool {
-        case .rectangle:
-            if let rect = pendingRect, rect.width > 2, rect.height > 2 {
-                onAddRectangle?(rect)
-            }
         case .select:
-            if let id = movingID, moveOffset != .zero {
-                onMove?(id, moveOffset)
-            }
+            if let id = movingID, moveOffset != .zero { onMove?(id, moveOffset) }
+        case .rectangle, .arrow, .freehand, .highlight:
+            if let kind = pendingKind, Self.isCommittable(kind) { onCommit?(kind) }
+        case .text:
+            break
         }
-        pendingRect = nil
         dragStart = nil
+        strokePoints = []
+        pendingKind = nil
         movingID = nil
         moveOffset = .zero
         needsDisplay = true
+    }
+
+    private func updatePending(to point: CGPoint) {
+        guard let start = dragStart else { return }
+        switch tool {
+        case .rectangle:
+            pendingKind = .rectangle(CGRect(x: min(start.x, point.x), y: min(start.y, point.y),
+                                            width: abs(point.x - start.x), height: abs(point.y - start.y)))
+        case .arrow:
+            pendingKind = .arrow(from: start, to: point)
+        case .freehand:
+            pendingKind = .freehand(strokePoints)
+        case .highlight:
+            pendingKind = .highlight(strokePoints)
+        default:
+            break
+        }
+    }
+
+    private static func isCommittable(_ kind: MarkupObject.Kind) -> Bool {
+        switch kind {
+        case .rectangle(let rect):
+            return rect.width > 2 && rect.height > 2
+        case .arrow(let from, let to):
+            return hypot(to.x - from.x, to.y - from.y) > 4
+        case .freehand(let points), .highlight(let points):
+            return points.count >= 2
+        case .text:
+            return true
+        }
+    }
+
+    // MARK: - Text entry
+
+    private func beginText(at viewPoint: CGPoint) {
+        endText() // commit any field already open
+        let field = NSTextField()
+        field.font = .boldSystemFont(ofSize: activeStyle.fontSize * scale)
+        field.textColor = NSColor(activeStyle.stroke)
+        field.isBordered = false
+        field.drawsBackground = true
+        field.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.85)
+        field.focusRingType = .none
+        field.delegate = self
+        let height = max(24, activeStyle.fontSize * scale * 1.4)
+        field.frame = CGRect(x: viewPoint.x, y: viewPoint.y, width: 220, height: height)
+        addSubview(field)
+        window?.makeFirstResponder(field)
+        textField = field
+        textOriginView = viewPoint
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        endText()
+    }
+
+    private func endText() {
+        guard let field = textField, let originView = textOriginView else { return }
+        let string = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        textField = nil
+        textOriginView = nil
+        field.removeFromSuperview()
+        guard !string.isEmpty else { return }
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: activeStyle.fontSize),
+        ]
+        let size = (string as NSString).size(withAttributes: attributes)
+        let rect = CGRect(origin: toCapture(originView), size: size)
+        onCommit?(.text(string, rect))
     }
 }

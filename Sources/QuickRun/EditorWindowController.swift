@@ -46,7 +46,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         window.tabbingMode = .disallowed
 
         canvas.image = image
-        canvas.onAddRectangle = { [weak self] rect in self?.addRectangle(rect) }
+        canvas.onCommit = { [weak self] kind in self?.commit(kind) }
         canvas.onSelect = { [weak self] id in self?.viewModel.select(objectID: id); self?.refresh() }
         canvas.onMove = { [weak self] id, offset in self?.moveSelection(id: id, by: offset) }
 
@@ -110,8 +110,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         refresh()
     }
 
-    private func addRectangle(_ rect: CGRect) {
-        viewModel.addObject(MarkupObject(kind: .rectangle(rect), style: viewModel.defaultStyle))
+    private func commit(_ kind: MarkupObject.Kind) {
+        viewModel.addObject(MarkupObject(kind: kind, style: viewModel.defaultStyle))
         refresh()
     }
 
@@ -165,6 +165,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         canvas.objects = viewModel.document.objects
         canvas.selectedID = viewModel.selectedObjectID
         canvas.tool = viewModel.currentTool
+        canvas.activeStyle = viewModel.defaultStyle
         for (tool, button) in toolButtons {
             button.contentTintColor = tool == viewModel.currentTool ? Palette.accent : .secondaryLabelColor
         }
@@ -212,11 +213,21 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         bar.state = .active
         bar.translatesAutoresizingMaskIntoConstraints = false
 
-        let select = makeToolButton(symbol: "cursorarrow", tooltip: "Select")
-        let rectangle = makeToolButton(symbol: "rectangle", tooltip: "Rectangle")
-        toolButtons = [.select: select, .rectangle: rectangle]
-        select.action = #selector(toolTapped(_:))
-        rectangle.action = #selector(toolTapped(_:))
+        let tools: [(MarkupTool, String, String)] = [
+            (.select, "cursorarrow", "Select"),
+            (.rectangle, "rectangle", "Rectangle"),
+            (.arrow, "arrow.up.right", "Arrow"),
+            (.text, "textformat", "Text"),
+            (.freehand, "pencil.tip", "Pen"),
+            (.highlight, "highlighter", "Highlighter"),
+        ]
+        toolButtons = [:]
+        let toolViews: [NSView] = tools.map { tool, symbol, tooltip in
+            let button = makeToolButton(symbol: symbol, tooltip: tooltip)
+            button.action = #selector(toolTapped(_:))
+            toolButtons[tool] = button
+            return button
+        }
 
         let undo = makeButton(symbol: "arrow.uturn.backward", tooltip: "Undo", action: #selector(undoTapped))
         let redo = makeButton(symbol: "arrow.uturn.forward", tooltip: "Redo", action: #selector(redoTapped))
@@ -229,7 +240,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         colorWell.widthAnchor.constraint(equalToConstant: 30).isActive = true
         colorWell.heightAnchor.constraint(equalToConstant: 22).isActive = true
 
-        let leading = NSStackView(views: [select, rectangle, divider(), undo, redo, delete, colorWell])
+        let leading = NSStackView(views: toolViews + [divider(), undo, redo, delete, colorWell])
         leading.orientation = .horizontal
         leading.spacing = 8
         leading.translatesAutoresizingMaskIntoConstraints = false

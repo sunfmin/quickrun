@@ -71,7 +71,7 @@ final class EditorViewModelTests: XCTestCase {
         let object = rect(0, 0, 10, 10)
         vm.addObject(object)
         vm.moveSelection(by: CGSize(width: 4, height: 6))
-        XCTAssertEqual(vm.document.objects.first?.bounds, CGRect(x: 4, y: 6, width: 10, height: 10))
+        XCTAssertEqual(vm.document.objects.first?.kind, .rectangle(CGRect(x: 4, y: 6, width: 10, height: 10)))
     }
 
     func testSetStyleRestylesSelectionAndSetsDefault() {

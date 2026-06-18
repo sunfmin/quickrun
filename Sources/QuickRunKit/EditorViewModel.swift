@@ -5,6 +5,10 @@ import Foundation
 public enum MarkupTool: Equatable {
     case select
     case rectangle
+    case arrow
+    case text
+    case freehand
+    case highlight
 }
 
 /// An action the Editor's glue should perform, decided by the pure view model.
