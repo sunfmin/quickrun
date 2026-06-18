@@ -70,6 +70,24 @@ final class PanelViewModelTests: XCTestCase {
         XCTAssertEqual(vm.states[1], .loading)
     }
 
+    func testQueryIsPreservedAcrossTabSwitch() {
+        let vm = PanelViewModel(sources: sources)
+        vm.open(selection: "cat")
+        // Switching tabs must not clobber the Query: the field projects this
+        // value, so it stays consistent with what the active tab loads.
+        vm.switchTo(1)
+        XCTAssertEqual(vm.query, "cat")
+        vm.switchTo(2)
+        XCTAssertEqual(vm.query, "cat")
+    }
+
+    func testSubmitUpdatesTheQuery() {
+        let vm = PanelViewModel(sources: sources)
+        vm.open(selection: "cat")
+        vm.submit(query: "dog")
+        XCTAssertEqual(vm.query, "dog")
+    }
+
     func testSwitchOutOfRangeIsIgnored() {
         let vm = PanelViewModel(sources: sources)
         vm.open(selection: "hello")

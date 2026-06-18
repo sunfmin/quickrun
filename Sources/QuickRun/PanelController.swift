@@ -173,9 +173,9 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         setupIfNeeded(for: sources)
         suppressFocusRestore = false
         previousApp = NSWorkspace.shared.frontmostApplication
-        queryField.stringValue = selection
 
         let request = viewModel?.open(selection: selection)
+        renderQuery()
         tabBar.select(viewModel?.activeIndex ?? 0, animated: false)
         showActiveWebView()
         if let request { execute(request) }
@@ -226,8 +226,7 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
                 self.queryField.selectText(nil)
                 return
             }
-            self.queryField.stringValue = text
-            self.submit()
+            self.run(query: text)
         }
     }
 
@@ -262,8 +261,23 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     // MARK: - Actions
 
     @objc private func submit() {
-        guard let request = viewModel?.submit(query: queryField.stringValue) else { return }
-        execute(request)
+        run(query: queryField.stringValue)
+    }
+
+    /// Run a Query through the view model — the single place a Query is committed
+    /// to the model — then project the model's Query back onto the field so the
+    /// two never drift.
+    private func run(query: String) {
+        if let request = viewModel?.submit(query: query) { execute(request) }
+        renderQuery()
+    }
+
+    /// The Query field is a projection of `PanelViewModel.query`: the model owns
+    /// the Query, the field shows it. Called after every path that changes the
+    /// model's Query — open, tab switch, submit.
+    private func renderQuery() {
+        guard let viewModel else { return }
+        queryField.stringValue = viewModel.query
     }
 
     @objc private func openSettings() {
@@ -276,6 +290,7 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private func tabSelected(_ index: Int) {
         showActiveWebView(index: index)
         if let request = viewModel?.switchTo(index) { execute(request) }
+        renderQuery()
     }
 
     private func execute(_ request: LoadRequest) {
