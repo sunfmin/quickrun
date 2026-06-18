@@ -633,25 +633,46 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
             return
         }
         let point = convert(event.locationInWindow, from: nil)
-        guard isMarkupActive else {
+        guard let region = committedSelection else {
             regionDragStart = point
             liveRegion = nil
             needsDisplay = true
             return
         }
-        // A region handle resizes — highest priority, so an edge near a word or
-        // mark is still grabbable.
-        if tool == .select, let handle = committedSelection?.handle(at: point, tolerance: Self.handleTolerance) {
+        // The pure resolver decides what the click means; the view only carries
+        // out the verdict and holds the resulting drag state.
+        switch EditorInteraction.resolve(
+            tool: tool, point: point, region: region,
+            handleTolerance: Self.handleTolerance,
+            wordRects: wordsAreClickable ? words.map(\.rect) : [],
+            marks: objects
+        ) {
+        case .resizeRegion(let handle):
             resizingHandle = handle
             words = [] // boxes are stale until OCR re-runs for the new region
-            return
-        }
-        // A Recognized word looked up takes priority over starting a mark.
-        if let index = wordIndex(at: point) {
+        case .lookUpWord(let index):
             onLookUpWord?(words[index].text)
-            return
+        case .selectMark(let id):
+            onSelectMark?(id)
+            movingID = id
+            markDragStart = point
+            moveOffset = .zero
+        case .moveRegion:
+            onSelectMark?(nil)
+            movingRegion = true
+            regionMoveStart = point
+            regionMoveOrigin = region.rect
+        case .deselect:
+            onSelectMark?(nil)
+            markDragStart = nil
+            movingID = nil
+        case .beginText:
+            beginText(at: point)
+        case .drawMarkup:
+            markDragStart = point
+            strokePoints = [point]
+            updatePending(to: point)
         }
-        markupMouseDown(at: point)
         needsDisplay = true
     }
 
@@ -708,35 +729,6 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     }
 
     // MARK: - Markup mouse (frozen-screen space; identity mapping)
-
-    private func markupMouseDown(at point: CGPoint) {
-        switch tool {
-        case .select:
-            if let hit = objects.last(where: { $0.bounds.contains(point) }) {
-                onSelectMark?(hit.id)
-                movingID = hit.id
-                markDragStart = point
-                moveOffset = .zero
-            } else if let rect = committedRect, rect.contains(point) {
-                // Empty space inside the region → drag moves the whole region.
-                onSelectMark?(nil)
-                movingRegion = true
-                regionMoveStart = point
-                regionMoveOrigin = rect
-            } else {
-                // Outside the region → deselect (and the Panel closes on resign).
-                onSelectMark?(nil)
-                markDragStart = nil
-                movingID = nil
-            }
-        case .text:
-            beginText(at: point)
-        case .rectangle, .arrow, .freehand, .highlight, .blur:
-            markDragStart = point
-            strokePoints = [point]
-            updatePending(to: point)
-        }
-    }
 
     private func markupMouseDragged(to point: CGPoint) {
         switch tool {
