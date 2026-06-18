@@ -117,35 +117,22 @@ final class CaptureOverlayController: NSObject {
             view.words = []
             return
         }
-        let pixels = pixelRect(for: region)
+        let pixels = CaptureGeometry.pixelRect(forViewRect: region, viewHeight: frozen.frame.height, scale: frozen.scale)
         let work = DispatchWorkItem { [weak self] in
             guard let self, let cropped = self.frozen.image.cropping(to: pixels) else { return }
             let observations = self.recognizer.recognizeWords(in: cropped)
             let words = RecognizedWordExtractor.clickableWords(from: observations)
-            // Map each box (normalized to the region image, bottom-left origin)
-            // into frozen-screen view points within the region.
+            // Each box is normalized to the region image (bottom-left origin);
+            // CaptureGeometry places it back into frozen-screen view points.
             let hits = words.map { word in
                 CaptureOverlayView.WordHit(
                     text: word.text,
-                    rect: CGRect(x: region.minX + word.box.minX * region.width,
-                                 y: region.minY + word.box.minY * region.height,
-                                 width: word.box.width * region.width,
-                                 height: word.box.height * region.height))
+                    rect: CaptureGeometry.viewRect(forNormalizedBox: word.box, in: region))
             }
             DispatchQueue.main.async { [weak self] in self?.view.words = hits }
         }
         recognizeWork = work
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.15, execute: work)
-    }
-
-    /// Map a region in view points (bottom-left origin) to the frozen image's
-    /// pixel rect (top-left origin, native resolution).
-    private func pixelRect(for region: CGRect) -> CGRect {
-        let s = frozen.scale
-        return CGRect(x: region.minX * s,
-                      y: (frozen.frame.height - region.maxY) * s,
-                      width: region.width * s,
-                      height: region.height * s)
     }
 
     // MARK: - Markup edits
