@@ -23,17 +23,17 @@ _Avoid_: popup, popover, window
 ## Capture
 
 **Capture**:
-The screenshot image of a screen region the user selects when the hotkey fires with no Selection. Unlike a Selection it is pixels, not text — text is recovered from it by OCR.
+The region of the frozen screen the user selects on the Editor when the hotkey fires with no Selection. Unlike a Selection it is pixels, not text — text is recovered from it by OCR.
 _Avoid_: screenshot, image, snapshot
 
 **Recognized word**:
-A distinct word OCR found in the Capture, listed in the Editor. Choosing one becomes the Query and looks it up immediately — the screenshot counterpart of a Selection.
+A word OCR found in the Capture, drawn as live clickable text on it: hovering highlights the word, clicking makes it the Query and looks it up immediately — the screenshot counterpart of a Selection.
 _Avoid_: token, OCR result, label
 
 **Editor**:
-The window that presents a Capture: it lists the Recognized words for lookup, hosts Markup of the Capture, and saves the Capture to the clipboard or a file. Distinct from the Panel, which only renders Sources.
-_Avoid_: markup window, preview, canvas
+The full-screen overlay that freezes the screen so the user can select the Capture, mark it up, click its Recognized words to look them up, and copy or save it — all in place, where the content sits. Not a separate window.
+_Avoid_: editor window, preview, canvas
 
 **Markup**:
-The arrows, boxes, text, strokes, and redactions the user lays over a Capture in the Editor. Each is an editable object until the Capture is saved, when they are flattened into the pixels.
-_Avoid_: annotation, drawing, overlay
+The arrows, boxes, text, strokes, and redactions the user lays over a Capture in the Editor. Each is an editable object until the Capture is copied or saved, when they are flattened into the pixels.
+_Avoid_: annotation, drawing

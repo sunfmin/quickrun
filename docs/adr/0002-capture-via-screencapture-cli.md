@@ -1,5 +1,9 @@
 # Capture screen regions via the `screencapture` CLI, not ScreenCaptureKit
 
+Status: superseded by ADR 0003 — the move to in-place capture required a
+self-drawn overlay over a frozen screen, and with it the Screen Recording
+permission this ADR set out to avoid.
+
 For the no-Selection screenshot path we shell out to macOS's `screencapture -i`
 (writing to a temp PNG we then load into the Editor) instead of using
 ScreenCaptureKit's `SCScreenshotManager`. The decisive reason is permissions:
