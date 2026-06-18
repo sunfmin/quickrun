@@ -7,7 +7,7 @@ final class RecognizedWordExtractorTests: XCTestCase {
     }
 
     func testKeepsContractionsWhole() {
-        XCTAssertEqual(RecognizedWordExtractor.words(from: ["I don't know"]), ["I", "don't", "know"])
+        XCTAssertEqual(RecognizedWordExtractor.words(from: ["we don't know"]), ["we", "don't", "know"])
     }
 
     func testSplitsHyphenatedWords() {
@@ -34,6 +34,16 @@ final class RecognizedWordExtractorTests: XCTestCase {
             RecognizedWordExtractor.words(from: ["alpha beta", "gamma alpha"]),
             ["alpha", "beta", "gamma"]
         )
+    }
+
+    func testDropsLoneLatinLettersAndPureNumbers() {
+        // "I" and "a" are casualties of dropping single Latin letters, but the
+        // OCR specks "h" and "1" — the real noise — go with them.
+        XCTAssertEqual(RecognizedWordExtractor.words(from: ["a cat h sat 1 时 2026"]), ["cat", "sat", "时"])
+    }
+
+    func testKeepsSingleCJKCharacters() {
+        XCTAssertEqual(RecognizedWordExtractor.words(from: ["你 好"]), ["你", "好"])
     }
 
     func testEmptyAndWhitespaceYieldNoWords() {

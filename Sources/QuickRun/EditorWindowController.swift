@@ -17,8 +17,9 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     private let canvas = MarkupCanvasView()
     private let wordsStack = NSStackView()
     private let statusLabel = NSTextField(labelWithString: "Recognizing…")
-    private let colorWell = NSColorWell()
-    private var toolButtons: [MarkupTool: NSButton] = [:]
+    private let colorSwatch = SwatchButton(color: .sealRed, diameter: 24, target: nil, action: nil)
+    private let colorPopover = NSPopover()
+    private var toolButtons: [MarkupTool: ToolButton] = [:]
     private var keyMonitor: Any?
 
     private let viewModel = EditorViewModel()
@@ -46,6 +47,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         window.level = .floating
         window.delegate = self
         window.tabbingMode = .disallowed
+        window.minSize = NSSize(width: 720, height: 420)
 
         canvas.image = image
         canvas.onCommit = { [weak self] kind in self?.commit(kind) }
@@ -75,15 +77,10 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         viewModel.setRecognizedWords(words)
         wordsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (index, word) in words.enumerated() {
-            let button = NSButton(title: word, target: self, action: #selector(wordTapped(_:)))
-            button.isBordered = false
-            button.setButtonType(.momentaryChange)
-            button.alignment = .left
-            button.contentTintColor = .labelColor
-            button.font = .quickRunSerif(ofSize: 15, weight: .regular)
-            button.tag = index
-            wordsStack.addArrangedSubview(button)
-            button.widthAnchor.constraint(equalTo: wordsStack.widthAnchor).isActive = true
+            let row = WordRowButton(word: word, target: self, action: #selector(wordTapped(_:)))
+            row.tag = index
+            wordsStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: wordsStack.widthAnchor).isActive = true
         }
         statusLabel.stringValue = words.isEmpty ? "No text found" : ""
         statusLabel.isHidden = !words.isEmpty
@@ -108,9 +105,16 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     @objc private func copyTapped() { execute(viewModel.copy()) }
     @objc private func saveTapped() { execute(viewModel.save()) }
 
-    @objc private func colorChanged(_ sender: NSColorWell) {
-        viewModel.setStyle(MarkupStyle(stroke: sender.color.rgba, lineWidth: viewModel.defaultStyle.lineWidth))
-        refresh()
+    @objc private func showColorPopover() {
+        let current = viewModel.defaultStyle
+        let palette = ColorPaletteViewController(current: current.stroke) { [weak self] color in
+            guard let self else { return }
+            self.viewModel.setStyle(MarkupStyle(stroke: color, lineWidth: current.lineWidth, fontSize: current.fontSize))
+            self.refresh()
+        }
+        colorPopover.contentViewController = palette
+        colorPopover.behavior = .transient
+        colorPopover.show(relativeTo: colorSwatch.bounds, of: colorSwatch, preferredEdge: .maxY)
     }
 
     private func commit(_ kind: MarkupObject.Kind) {
@@ -187,8 +191,9 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         canvas.tool = viewModel.currentTool
         canvas.activeStyle = viewModel.defaultStyle
         for (tool, button) in toolButtons {
-            button.contentTintColor = tool == viewModel.currentTool ? Palette.accent : .secondaryLabelColor
+            button.isActive = tool == viewModel.currentTool
         }
+        colorSwatch.color = viewModel.defaultStyle.stroke
     }
 
     // MARK: - NSWindowDelegate
@@ -244,7 +249,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         ]
         toolButtons = [:]
         let toolViews: [NSView] = tools.map { tool, symbol, tooltip in
-            let button = makeToolButton(symbol: symbol, tooltip: tooltip)
+            let button = ToolButton(symbol: symbol, tooltip: tooltip)
+            button.target = self
             button.action = #selector(toolTapped(_:))
             toolButtons[tool] = button
             return button
@@ -254,14 +260,11 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         let redo = makeButton(symbol: "arrow.uturn.forward", tooltip: "Redo", action: #selector(redoTapped))
         let delete = makeButton(symbol: "trash", tooltip: "Delete", action: #selector(deleteTapped))
 
-        colorWell.color = NSColor(viewModel.defaultStyle.stroke)
-        colorWell.target = self
-        colorWell.action = #selector(colorChanged(_:))
-        colorWell.translatesAutoresizingMaskIntoConstraints = false
-        colorWell.widthAnchor.constraint(equalToConstant: 30).isActive = true
-        colorWell.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        colorSwatch.target = self
+        colorSwatch.action = #selector(showColorPopover)
+        colorSwatch.toolTip = "Stroke colour"
 
-        let leading = NSStackView(views: toolViews + [divider(), undo, redo, delete, colorWell])
+        let leading = NSStackView(views: toolViews + [divider(), undo, redo, delete, divider(), colorSwatch])
         leading.orientation = .horizontal
         leading.spacing = 8
         leading.translatesAutoresizingMaskIntoConstraints = false
@@ -282,12 +285,6 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
             trailing.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
         ])
         return bar
-    }
-
-    private func makeToolButton(symbol: String, tooltip: String) -> NSButton {
-        let button = makeButton(symbol: symbol, tooltip: tooltip, action: nil)
-        button.target = self
-        return button
     }
 
     private func makeButton(symbol: String, tooltip: String, action: Selector?) -> NSButton {
