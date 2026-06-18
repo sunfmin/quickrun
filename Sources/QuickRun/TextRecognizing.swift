@@ -29,12 +29,16 @@ final class VisionTextRecognizer: TextRecognizing {
             guard let candidate = observation.topCandidates(1).first else { continue }
             let string = candidate.string
             // Shared segmentation (ICU + symbol split) so a path's segments are
-            // each their own word. Vision reports a box per line but not reliably
-            // per sub-word — its per-range box tends to span the whole line/token,
-            // merging adjacent words' highlights — so each word's box is sliced
-            // from the line box by character position instead.
+            // each their own word. Ask Vision for each word's real box via
+            // boundingBox(for:) — the range indexes candidate.string, so it lines
+            // up — which honours actual glyph widths. A proportional font would
+            // otherwise drift: slicing the line box by character count assumes a
+            // uniform width and misplaces words later in the line. Fall back to
+            // the character-proportional slice only when Vision gives no box.
             for segment in RecognizedWordExtractor.segments(in: string) {
-                let box = RecognizedWordExtractor.wordBox(in: observation.boundingBox, line: string, range: segment.range)
+                let visionBox = (try? candidate.boundingBox(for: segment.range)) ?? nil
+                let box = visionBox?.boundingBox
+                    ?? RecognizedWordExtractor.wordBox(in: observation.boundingBox, line: string, range: segment.range)
                 result.append(OCRObservation(text: segment.text, box: box))
             }
         }
