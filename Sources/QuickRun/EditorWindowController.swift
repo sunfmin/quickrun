@@ -35,7 +35,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         let windowSize = Self.windowSize(for: image)
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: windowSize),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
