@@ -39,11 +39,10 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     /// row + hairline) above the web content.
     private let topInset: CGFloat = 88
 
-    /// A full-bleed 1pt rule that adapts to light/dark, pinned by its top edge.
+    /// A full-bleed 1pt rule that tracks light/dark, pinned by its top edge.
     private func hairline(width: CGFloat, y: CGFloat) -> NSView {
-        let rule = NSView(frame: NSRect(x: 0, y: y, width: width, height: 1))
-        rule.wantsLayer = true
-        rule.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        let rule = DynamicLayerView(frame: NSRect(x: 0, y: y, width: width, height: 1))
+        rule.fillColor = .separatorColor
         rule.autoresizingMask = [.width, .minYMargin]
         return rule
     }

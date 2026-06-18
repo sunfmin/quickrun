@@ -125,9 +125,8 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         content.addSubview(chooseButton)
         updateSaveLocationLabel()
 
-        let divider = NSView(frame: NSRect(x: 20, y: 336, width: 560, height: 1))
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        let divider = DynamicLayerView(frame: NSRect(x: 20, y: 336, width: 560, height: 1))
+        divider.fillColor = .separatorColor
         divider.autoresizingMask = [.width, .minYMargin]
         content.addSubview(divider)
 
@@ -135,13 +134,11 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         content.addSubview(sectionHeader("Sources", y: 304))
         content.addSubview(caption("Each Source opens in its own tab. {q} is replaced with your selection.", x: 20, y: 282, width: 560))
 
-        let listBox = NSView(frame: NSRect(x: 20, y: 54, width: 560, height: 216))
-        listBox.wantsLayer = true
-        listBox.layer?.cornerRadius = 8
-        listBox.layer?.borderWidth = 1
-        listBox.layer?.borderColor = NSColor.separatorColor.cgColor
-        listBox.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
-        listBox.layer?.masksToBounds = true
+        let listBox = DynamicLayerView(frame: NSRect(x: 20, y: 54, width: 560, height: 216))
+        listBox.cornerRadius = 8
+        listBox.borderWidth = 1
+        listBox.borderColor = .separatorColor
+        listBox.fillColor = .textBackgroundColor
         listBox.autoresizingMask = [.width, .height]
 
         let scroll = NSScrollView(frame: listBox.bounds)

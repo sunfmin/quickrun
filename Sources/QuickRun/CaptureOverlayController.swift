@@ -388,9 +388,8 @@ final class CaptureOverlayController: NSObject {
     }
 
     private func divider() -> NSView {
-        let line = NSView()
-        line.wantsLayer = true
-        line.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        let line = DynamicLayerView()
+        line.fillColor = .separatorColor
         line.translatesAutoresizingMaskIntoConstraints = false
         line.widthAnchor.constraint(equalToConstant: 1).isActive = true
         line.heightAnchor.constraint(equalToConstant: 20).isActive = true
