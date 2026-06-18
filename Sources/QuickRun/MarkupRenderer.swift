@@ -134,53 +134,57 @@ enum Pixelate {
     }
 }
 
-/// Flattens a Capture and its Markup into a single image.
+/// Flattens the Capture region of a frozen still and its Markup into a single
+/// image. In the in-place redesign (ADR 0003) the marks live in frozen-screen
+/// point space (bottom-left origin) alongside the still, and the output is the
+/// chosen `region` cropped out at native resolution — so anything a mark draws
+/// outside the Capture is clipped away.
 enum MarkupRenderer {
-    /// Render `objects` over `image` at the image's native resolution, in
-    /// capture space (bottom-left origin), and return the composited image.
-    static func flatten(image: NSImage, objects: [MarkupObject]) -> NSImage {
-        let logical = image.size
-        let pixel = pixelSize(of: image)
-        guard logical.width > 0, logical.height > 0,
+    /// Render `objects` over `image` (both in frozen-screen point space) and
+    /// crop to `region`, at `scale` pixels per point so the result is crisp on
+    /// Retina. Marks are clipped to the region.
+    static func flatten(image: NSImage, objects: [MarkupObject], region: CGRect, scale: CGFloat) -> NSImage {
+        let r = region.standardized
+        guard r.width > 0, r.height > 0,
               let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil,
-                pixelsWide: Int(pixel.width.rounded()),
-                pixelsHigh: Int(pixel.height.rounded()),
+                pixelsWide: Int((r.width * scale).rounded()),
+                pixelsHigh: Int((r.height * scale).rounded()),
                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
         else { return image }
-        // Setting the rep's logical size establishes the drawing coordinate
-        // system; the larger pixel backing means strokes stay crisp at native res.
-        rep.size = logical
+        // The rep's logical size is the region in points; the larger pixel
+        // backing keeps the still and the strokes sharp at native resolution.
+        rep.size = r.size
 
         guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return image }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
-        image.draw(in: NSRect(origin: .zero, size: logical))
+
+        // Shift frozen-screen space so the region's bottom-left is the output
+        // origin, then clip to the region before drawing the still and its marks.
+        let transform = NSAffineTransform()
+        transform.translateX(by: -r.minX, yBy: -r.minY)
+        transform.concat()
+        NSBezierPath(rect: r).setClip()
+
+        image.draw(in: NSRect(origin: .zero, size: image.size))
         for object in objects {
             MarkupDrawing.draw(object, image: image)
         }
         context.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()
 
-        let output = NSImage(size: logical)
+        let output = NSImage(size: r.size)
         output.addRepresentation(rep)
         return output
     }
 
-    /// PNG data for the flattened image, for the clipboard or a file.
-    static func pngData(image: NSImage, objects: [MarkupObject]) -> Data? {
-        let flattened = flatten(image: image, objects: objects)
+    /// PNG data for the flattened Capture, for the clipboard or a file.
+    static func pngData(image: NSImage, objects: [MarkupObject], region: CGRect, scale: CGFloat) -> Data? {
+        let flattened = flatten(image: image, objects: objects, region: region, scale: scale)
         guard let tiff = flattened.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
-    }
-
-    private static func pixelSize(of image: NSImage) -> NSSize {
-        let pixels = image.representations.reduce(NSSize.zero) { acc, rep in
-            NSSize(width: max(acc.width, CGFloat(rep.pixelsWide)),
-                   height: max(acc.height, CGFloat(rep.pixelsHigh)))
-        }
-        return pixels == .zero ? image.size : pixels
     }
 }

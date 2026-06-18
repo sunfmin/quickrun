@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         DisplayFreezer.freezeDisplayUnderCursor { [weak self] frozen in
             guard let self, let frozen else { return }
-            let overlay = CaptureOverlayController(frozen: frozen)
+            let overlay = CaptureOverlayController(frozen: frozen, saveLocation: self.saveLocationStore)
             overlay.onClosed = { [weak self] in self?.overlay = nil }
             self.overlay = overlay
             overlay.show()
