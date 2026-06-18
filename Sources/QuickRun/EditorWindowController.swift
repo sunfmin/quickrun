@@ -2,32 +2,35 @@ import AppKit
 import QuickRunKit
 
 /// The Editor: a floating window presenting a Capture. It shows the captured
-/// image alongside the list of Recognized words; clicking a word looks it up.
-/// Later slices add the Markup toolbar and saving. Distinct from the Panel,
-/// which only renders Sources.
+/// image on a Markup canvas, with a toolbar above and the Recognized-word list
+/// beside it. Clicking a word looks it up; the toolbar marks the image up and
+/// copies the flattened result. Distinct from the Panel, which only renders
+/// Sources.
 ///
 /// Unlike the hotkey-summoned Panel HUD, the Editor does not dismiss on losing
 /// key focus — it is a working surface that coexists with the Panel until the
 /// user closes it (Esc or the close button).
 final class EditorWindowController: NSObject, NSWindowDelegate {
     private let window: NSWindow
-    private let imageView = NSImageView()
+    private let image: NSImage
+    private let canvas = MarkupCanvasView()
     private let wordsStack = NSStackView()
     private let statusLabel = NSTextField(labelWithString: "Recognizing…")
-    private var escMonitor: Any?
+    private let colorWell = NSColorWell()
+    private var toolButtons: [MarkupTool: NSButton] = [:]
+    private var keyMonitor: Any?
 
-    private var viewModel = EditorViewModel()
+    private let viewModel = EditorViewModel()
 
-    /// Called when the window closes, so the owner can drop its reference.
     var onClosed: (() -> Void)?
-    /// Called with the Query when the user picks a Recognized word.
     var onLookUp: ((String) -> Void)?
 
     private static let sidebarWidth: CGFloat = 220
+    private static let toolbarHeight: CGFloat = 46
 
     init(image: NSImage) {
-        let imageSize = Self.imagePointSize(for: image)
-        let windowSize = Self.windowSize(forImage: imageSize)
+        self.image = image
+        let windowSize = Self.windowSize(for: image)
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: windowSize),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
@@ -42,36 +45,21 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         window.delegate = self
         window.tabbingMode = .disallowed
 
-        let content = window.contentView!
-        imageView.image = image
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.translatesAutoresizingMaskIntoConstraints = false
+        canvas.image = image
+        canvas.onAddRectangle = { [weak self] rect in self?.addRectangle(rect) }
+        canvas.onSelect = { [weak self] id in self?.viewModel.select(objectID: id); self?.refresh() }
+        canvas.onMove = { [weak self] id, offset in self?.moveSelection(id: id, by: offset) }
 
-        let sidebar = makeSidebar()
-        content.addSubview(imageView)
-        content.addSubview(sidebar)
+        layOutContent()
+        refresh()
 
-        NSLayoutConstraint.activate([
-            imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            imageView.topAnchor.constraint(equalTo: content.topAnchor),
-            imageView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            imageView.trailingAnchor.constraint(equalTo: sidebar.leadingAnchor),
-
-            sidebar.topAnchor.constraint(equalTo: content.topAnchor),
-            sidebar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            sidebar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: Self.sidebarWidth),
-        ])
-
-        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.window.isVisible, event.keyCode == 53 else { return event }
-            self.window.performClose(nil)
-            return nil
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleKey(event) == true ? nil : event
         }
     }
 
     deinit {
-        if let escMonitor { NSEvent.removeMonitor(escMonitor) }
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }
 
     func show() {
@@ -82,7 +70,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     /// Populate the Recognized-word list once OCR finishes.
     func setRecognizedWords(_ words: [String]) {
-        viewModel = EditorViewModel(recognizedWords: words)
+        viewModel.setRecognizedWords(words)
         wordsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (index, word) in words.enumerated() {
             let button = NSButton(title: word, target: self, action: #selector(wordTapped(_:)))
@@ -99,9 +87,87 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         statusLabel.isHidden = !words.isEmpty
     }
 
+    // MARK: - Actions
+
     @objc private func wordTapped(_ sender: NSButton) {
-        guard let query = viewModel.query(forWordAt: sender.tag) else { return }
-        onLookUp?(query)
+        guard let intent = viewModel.selectWord(at: sender.tag) else { return }
+        execute(intent)
+    }
+
+    @objc private func toolTapped(_ sender: NSButton) {
+        guard let tool = toolButtons.first(where: { $0.value === sender })?.key else { return }
+        viewModel.selectTool(tool)
+        refresh()
+    }
+
+    @objc private func undoTapped() { viewModel.undo(); refresh() }
+    @objc private func redoTapped() { viewModel.redo(); refresh() }
+    @objc private func deleteTapped() { viewModel.deleteSelection(); refresh() }
+    @objc private func copyTapped() { execute(viewModel.copy()) }
+
+    @objc private func colorChanged(_ sender: NSColorWell) {
+        viewModel.setStyle(MarkupStyle(stroke: sender.color.rgba, lineWidth: viewModel.defaultStyle.lineWidth))
+        refresh()
+    }
+
+    private func addRectangle(_ rect: CGRect) {
+        viewModel.addObject(MarkupObject(kind: .rectangle(rect), style: viewModel.defaultStyle))
+        refresh()
+    }
+
+    private func moveSelection(id: UUID, by offset: CGSize) {
+        viewModel.select(objectID: id)
+        viewModel.moveSelection(by: offset)
+        refresh()
+    }
+
+    private func execute(_ intent: EditorIntent) {
+        switch intent {
+        case .lookUp(let query):
+            onLookUp?(query)
+        case .copyToClipboard:
+            copyFlattenedToClipboard()
+        }
+    }
+
+    private func copyFlattenedToClipboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if let png = MarkupRenderer.pngData(image: image, objects: viewModel.document.objects) {
+            pasteboard.setData(png, forType: .png)
+        } else {
+            pasteboard.writeObjects([MarkupRenderer.flatten(image: image, objects: viewModel.document.objects)])
+        }
+    }
+
+    /// Returns true if the key was handled.
+    private func handleKey(_ event: NSEvent) -> Bool {
+        guard window.isKeyWindow else { return false }
+        let command = event.modifierFlags.contains(.command)
+        let shift = event.modifierFlags.contains(.shift)
+        switch event.keyCode {
+        case 53: // Esc
+            window.performClose(nil)
+            return true
+        case 6 where command: // Z
+            shift ? redoTapped() : undoTapped()
+            return true
+        case 51, 117: // delete / forward delete
+            guard viewModel.selectedObjectID != nil else { return false }
+            deleteTapped()
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func refresh() {
+        canvas.objects = viewModel.document.objects
+        canvas.selectedID = viewModel.selectedObjectID
+        canvas.tool = viewModel.currentTool
+        for (tool, button) in toolButtons {
+            button.contentTintColor = tool == viewModel.currentTool ? Palette.accent : .secondaryLabelColor
+        }
     }
 
     // MARK: - NSWindowDelegate
@@ -110,7 +176,105 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         onClosed?()
     }
 
-    // MARK: - Sidebar
+    // MARK: - Layout
+
+    private func layOutContent() {
+        let content = window.contentView!
+        let toolbar = makeToolbar()
+        let sidebar = makeSidebar()
+        canvas.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(toolbar)
+        content.addSubview(canvas)
+        content.addSubview(sidebar)
+
+        NSLayoutConstraint.activate([
+            sidebar.topAnchor.constraint(equalTo: content.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            sidebar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: Self.sidebarWidth),
+
+            toolbar.topAnchor.constraint(equalTo: content.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: sidebar.leadingAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: Self.toolbarHeight),
+
+            canvas.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            canvas.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            canvas.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            canvas.trailingAnchor.constraint(equalTo: sidebar.leadingAnchor),
+        ])
+    }
+
+    private func makeToolbar() -> NSView {
+        let bar = NSVisualEffectView()
+        bar.material = .titlebar
+        bar.blendingMode = .behindWindow
+        bar.state = .active
+        bar.translatesAutoresizingMaskIntoConstraints = false
+
+        let select = makeToolButton(symbol: "cursorarrow", tooltip: "Select")
+        let rectangle = makeToolButton(symbol: "rectangle", tooltip: "Rectangle")
+        toolButtons = [.select: select, .rectangle: rectangle]
+        select.action = #selector(toolTapped(_:))
+        rectangle.action = #selector(toolTapped(_:))
+
+        let undo = makeButton(symbol: "arrow.uturn.backward", tooltip: "Undo", action: #selector(undoTapped))
+        let redo = makeButton(symbol: "arrow.uturn.forward", tooltip: "Redo", action: #selector(redoTapped))
+        let delete = makeButton(symbol: "trash", tooltip: "Delete", action: #selector(deleteTapped))
+
+        colorWell.color = NSColor(viewModel.defaultStyle.stroke)
+        colorWell.target = self
+        colorWell.action = #selector(colorChanged(_:))
+        colorWell.translatesAutoresizingMaskIntoConstraints = false
+        colorWell.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        colorWell.heightAnchor.constraint(equalToConstant: 22).isActive = true
+
+        let leading = NSStackView(views: [select, rectangle, divider(), undo, redo, delete, colorWell])
+        leading.orientation = .horizontal
+        leading.spacing = 8
+        leading.translatesAutoresizingMaskIntoConstraints = false
+
+        let copy = makeButton(symbol: "doc.on.doc", tooltip: "Copy to clipboard", action: #selector(copyTapped))
+
+        bar.addSubview(leading)
+        bar.addSubview(copy)
+        NSLayoutConstraint.activate([
+            leading.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 14),
+            leading.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            copy.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -14),
+            copy.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+        ])
+        return bar
+    }
+
+    private func makeToolButton(symbol: String, tooltip: String) -> NSButton {
+        let button = makeButton(symbol: symbol, tooltip: tooltip, action: nil)
+        button.target = self
+        return button
+    }
+
+    private func makeButton(symbol: String, tooltip: String, action: Selector?) -> NSButton {
+        let button = NSButton()
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
+        button.imagePosition = .imageOnly
+        button.isBordered = false
+        button.setButtonType(.momentaryChange)
+        button.contentTintColor = .secondaryLabelColor
+        button.toolTip = tooltip
+        button.target = self
+        button.action = action
+        return button
+    }
+
+    private func divider() -> NSView {
+        let line = NSView()
+        line.wantsLayer = true
+        line.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        line.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        return line
+    }
 
     private func makeSidebar() -> NSView {
         let sidebar = NSVisualEffectView()
@@ -165,22 +329,17 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     // MARK: - Sizing
 
-    /// The image at its visual (point) size — pixel dimensions divided by the
-    /// main display's scale.
-    private static func imagePointSize(for image: NSImage) -> NSSize {
+    private static func windowSize(for image: NSImage) -> NSSize {
         let pixels = image.representations.reduce(NSSize.zero) { acc, rep in
             NSSize(width: max(acc.width, CGFloat(rep.pixelsWide)),
                    height: max(acc.height, CGFloat(rep.pixelsHigh)))
         }
         let raw = pixels == .zero ? image.size : pixels
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        return NSSize(width: raw.width / scale, height: raw.height / scale)
-    }
+        let pointScale = NSScreen.main?.backingScaleFactor ?? 2
+        let imageSize = NSSize(width: raw.width / pointScale, height: raw.height / pointScale)
 
-    /// The image (at point size) plus the sidebar, capped to 90% of the visible
-    /// screen with the image's aspect kept.
-    private static func windowSize(forImage image: NSSize) -> NSSize {
-        var size = NSSize(width: image.width + sidebarWidth, height: image.height)
+        var size = NSSize(width: imageSize.width + sidebarWidth,
+                          height: imageSize.height + toolbarHeight)
         if let visible = NSScreen.main?.visibleFrame.size {
             let factor = min(1, min(visible.width * 0.9 / size.width,
                                     visible.height * 0.9 / size.height))
