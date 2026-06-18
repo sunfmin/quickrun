@@ -18,6 +18,13 @@ final class CaptureOverlayController: NSObject {
     private let saveLocation: SaveLocationStore
 
     private let viewModel = EditorViewModel()
+    private let recognizer: TextRecognizing = VisionTextRecognizer()
+    /// Debounces OCR so a flurry of region changes (resizing) re-runs it once.
+    private var recognizeWork: DispatchWorkItem?
+
+    /// Forward a clicked Recognized word to the app, which looks it up in the
+    /// Panel. Set by the AppDelegate.
+    var onLookUpWord: ((String) -> Void)?
 
     // Floating toolbar, shown once a region is committed.
     private var toolbar: NSPanel?
@@ -58,6 +65,7 @@ final class CaptureOverlayController: NSObject {
         view.onUndo = { [weak self] in self?.viewModel.undo(); self?.refresh() }
         view.onRedo = { [weak self] in self?.viewModel.redo(); self?.refresh() }
         view.onDeleteSelection = { [weak self] in self?.viewModel.deleteSelection(); self?.refresh() }
+        view.onLookUpWord = { [weak self] word in self?.onLookUpWord?(word) }
     }
 
     func show() {
@@ -73,6 +81,49 @@ final class CaptureOverlayController: NSObject {
         positionToolbar(for: rect)
         toolbar?.orderFront(nil)
         refresh()
+        scheduleRecognition()
+    }
+
+    // MARK: - Recognized words (OCR the region into clickable hit areas)
+
+    /// OCR the current region off the main thread (debounced) and place each
+    /// clickable Recognized word at its on-Capture position. Called when the
+    /// region is committed, and (once resize lands in #18) whenever it changes.
+    private func scheduleRecognition() {
+        recognizeWork?.cancel()
+        guard let region = view.regionRect,
+              let cropped = frozen.image.cropping(to: pixelRect(for: region)) else {
+            view.words = []
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let observations = self.recognizer.recognizeWords(in: cropped)
+            let words = RecognizedWordExtractor.clickableWords(from: observations)
+            // Map each box (normalized to the region image, bottom-left origin)
+            // into frozen-screen view points within the region.
+            let hits = words.map { word in
+                CaptureOverlayView.WordHit(
+                    text: word.text,
+                    rect: CGRect(x: region.minX + word.box.minX * region.width,
+                                 y: region.minY + word.box.minY * region.height,
+                                 width: word.box.width * region.width,
+                                 height: word.box.height * region.height))
+            }
+            DispatchQueue.main.async { [weak self] in self?.view.words = hits }
+        }
+        recognizeWork = work
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    /// Map a region in view points (bottom-left origin) to the frozen image's
+    /// pixel rect (top-left origin, native resolution).
+    private func pixelRect(for region: CGRect) -> CGRect {
+        let s = frozen.scale
+        return CGRect(x: region.minX * s,
+                      y: (frozen.frame.height - region.maxY) * s,
+                      width: region.width * s,
+                      height: region.height * s)
     }
 
     // MARK: - Markup edits
@@ -316,6 +367,11 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     var tool: MarkupTool = .select
     var activeStyle = MarkupStyle()
 
+    /// A clickable Recognized word and its hit area in frozen-screen view points.
+    struct WordHit { var text: String; var rect: CGRect }
+    var words: [WordHit] = [] { didSet { hoveredWord = nil; needsDisplay = true } }
+    private var hoveredWord: Int?
+
     // Region-drag state (pre-commit).
     private var regionDragStart: CGPoint?
     private var liveRegion: RegionSelection?
@@ -339,6 +395,8 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     var onUndo: (() -> Void)?
     var onRedo: (() -> Void)?
     var onDeleteSelection: (() -> Void)?
+    /// A Recognized word was clicked — look it up in the Panel.
+    var onLookUpWord: ((String) -> Void)?
 
     private static let dimAlpha: CGFloat = 0.45
 
@@ -347,12 +405,27 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         self.frozenImage = NSImage(cgImage: frozen.image, size: frozen.frame.size)
         super.init(frame: NSRect(origin: .zero, size: frozen.frame.size))
         wantsLayer = true
+        addTrackingArea(NSTrackingArea(rect: .zero,
+                                       options: [.mouseMoved, .activeAlways, .inVisibleRect],
+                                       owner: self))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override var isFlipped: Bool { false } // bottom-left, matching screen points
     override var acceptsFirstResponder: Bool { true }
+    // Register a click even when the click is what activates the overlay (e.g.
+    // clicking a word while the Panel is key), so the click isn't swallowed.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// Recognized words are clickable only in the default Select tool — a drawing
+    /// tool means the user is marking up, not looking words up.
+    private var wordsAreClickable: Bool { isMarkupActive && tool == .select }
+
+    private func wordIndex(at point: CGPoint) -> Int? {
+        guard wordsAreClickable else { return nil }
+        return words.lastIndex { $0.rect.contains(point) }
+    }
 
     private var isMarkupActive: Bool { committedRect != nil }
 
@@ -381,6 +454,12 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         if let rect = committedRect {
             NSGraphicsContext.saveGraphicsState()
             NSBezierPath(rect: rect).addClip()
+            // Highlight the hovered Recognized word so it reads as clickable.
+            if let index = hoveredWord, words.indices.contains(index) {
+                let pill = words[index].rect.insetBy(dx: -3, dy: -2)
+                Palette.accent.withAlphaComponent(0.22).setFill()
+                NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4).fill()
+            }
             for object in objects {
                 MarkupDrawing.draw(object.id == movingID ? object.translated(by: moveOffset) : object, image: frozenImage)
             }
@@ -429,8 +508,23 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
 
     // MARK: - Mouse
 
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let index = wordIndex(at: point)
+        if index != hoveredWord {
+            hoveredWord = index
+            needsDisplay = true
+        }
+        (index != nil ? NSCursor.pointingHand : NSCursor.arrow).set()
+    }
+
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        // A Recognized word looked up takes priority over starting a mark.
+        if let index = wordIndex(at: point) {
+            onLookUpWord?(words[index].text)
+            return
+        }
         if isMarkupActive {
             markupMouseDown(at: point)
         } else {

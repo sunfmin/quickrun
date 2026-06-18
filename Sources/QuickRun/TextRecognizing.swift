@@ -1,31 +1,41 @@
-import AppKit
+import CoreGraphics
 import Vision
-
-/// Recognizes the text in a Capture, returning the recognized lines.
-protocol TextRecognizing {
-    /// The lines of text found in `image`, in Vision's reading order. Runs
-    /// synchronously — call it off the main thread.
-    func recognizedLines(in image: NSImage) -> [String]
-}
+import QuickRunKit
 
 /// OCR via the Vision framework, configured for the EN-CN dictionary use case:
-/// English plus Simplified and Traditional Chinese.
+/// English plus Simplified and Traditional Chinese. Conforms to QuickRunKit's
+/// `TextRecognizing` seam, yielding each word with its bounding box so the pure
+/// derivation can decide which become clickable Recognized words.
+///
+/// Vision recognizes lines; this splits each line into words on ICU word
+/// boundaries (the same segmentation as double-click-to-select) and asks Vision
+/// for each word's box, so the boxes are precise rather than guessed.
 final class VisionTextRecognizer: TextRecognizing {
-    func recognizedLines(in image: NSImage) -> [String] {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            return []
-        }
+    func recognizeWords(in image: CGImage) -> [OCRObservation] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
         request.recognitionLanguages = ["en-US", "zh-Hans", "zh-Hant"]
 
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
         do {
             try handler.perform([request])
         } catch {
             return []
         }
-        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+
+        var result: [OCRObservation] = []
+        for observation in request.results ?? [] {
+            guard let candidate = observation.topCandidates(1).first else { continue }
+            let string = candidate.string
+            string.enumerateSubstrings(in: string.startIndex..<string.endIndex, options: .byWords) { word, range, _, _ in
+                guard let word else { return }
+                // Vision's per-substring box is normalized to the image, bottom-
+                // left origin; fall back to the line box if it can't be derived.
+                let box = (try? candidate.boundingBox(for: range))?.boundingBox ?? observation.boundingBox
+                result.append(OCRObservation(text: word, box: box))
+            }
+        }
+        return result
     }
 }

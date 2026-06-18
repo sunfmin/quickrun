@@ -129,9 +129,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let frozen else { return }
             let overlay = CaptureOverlayController(frozen: frozen, saveLocation: self.saveLocationStore)
             overlay.onClosed = { [weak self] in self?.overlay = nil }
+            overlay.onLookUpWord = { [weak self] word in self?.lookUp(word) }
             self.overlay = overlay
             overlay.show()
         }
+    }
+
+    /// Look up a Recognized word clicked on the Capture. The Panel dismisses on
+    /// resign again (ADR 0003 / #20): clicking back on the overlay makes the
+    /// overlay key, so the Panel closes by itself while the overlay stays up.
+    private func lookUp(_ query: String) {
+        let controller = panel ?? PanelController()
+        controller.onOpenSettings = { [weak self] in self?.openSettings() }
+        panel = controller
+        controller.present(selection: query, sources: store.load())
     }
 
     private func presentScreenRecordingNeeded() {

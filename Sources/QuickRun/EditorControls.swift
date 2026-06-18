@@ -31,50 +31,6 @@ final class ToolButton: NSButton {
     }
 }
 
-/// A Recognized word, set as a serif headword that highlights on hover so the
-/// list reads like a column of dictionary entries waiting to be looked up.
-final class WordRowButton: NSButton {
-    private var hovering = false { didSet { updateBackground() } }
-
-    init(word: String, target: AnyObject, action: Selector) {
-        super.init(frame: .zero)
-        self.target = target
-        self.action = action
-        isBordered = false
-        setButtonType(.momentaryChange)
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 30).isActive = true
-
-        let indented = NSMutableParagraphStyle()
-        indented.firstLineHeadIndent = 10
-        indented.alignment = .left
-        attributedTitle = NSAttributedString(string: word, attributes: [
-            .font: NSFont.quickRunSerif(ofSize: 16, weight: .regular),
-            .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: indented,
-        ])
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds,
-                                       options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-                                       owner: self))
-    }
-
-    override func mouseEntered(with event: NSEvent) { hovering = true }
-    override func mouseExited(with event: NSEvent) { hovering = false }
-
-    private func updateBackground() {
-        layer?.backgroundColor = hovering ? Palette.accent.withAlphaComponent(0.10).cgColor : NSColor.clear.cgColor
-    }
-}
-
 /// A round colour swatch — the toolbar's current-ink chip and each preset in the
 /// colour popover.
 final class SwatchButton: NSButton {
