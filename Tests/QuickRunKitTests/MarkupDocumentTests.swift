@@ -95,6 +95,7 @@ final class MarkupDocumentTests: XCTestCase {
             .text("hi", CGRect(x: 1, y: 1, width: 8, height: 8)),
             .freehand([CGPoint(x: 0, y: 0), CGPoint(x: 3, y: 3)]),
             .highlight([CGPoint(x: 0, y: 0), CGPoint(x: 4, y: 0)]),
+            .blur(CGRect(x: 2, y: 2, width: 6, height: 6)),
         ]
         for kind in kinds { doc.add(MarkupObject(kind: kind)) }
         XCTAssertEqual(doc.objects.count, kinds.count)

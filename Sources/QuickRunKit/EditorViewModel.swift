@@ -9,6 +9,7 @@ public enum MarkupTool: Equatable {
     case text
     case freehand
     case highlight
+    case blur
 }
 
 /// An action the Editor's glue should perform, decided by the pure view model.

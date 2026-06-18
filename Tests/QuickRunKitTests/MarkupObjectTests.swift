@@ -39,6 +39,17 @@ final class MarkupObjectTests: XCTestCase {
         XCTAssertEqual(moved.kind, .highlight([CGPoint(x: 0, y: 5), CGPoint(x: 4, y: 5)]))
     }
 
+    func testBlurTranslates() {
+        let moved = object(.blur(CGRect(x: 1, y: 1, width: 6, height: 4)))
+            .translated(by: CGSize(width: 3, height: 2))
+        XCTAssertEqual(moved.kind, .blur(CGRect(x: 4, y: 3, width: 6, height: 4)))
+    }
+
+    func testBlurBoundsAreItsRect() {
+        let bounds = object(.blur(CGRect(x: 2, y: 3, width: 10, height: 5)), lineWidth: 0).bounds
+        XCTAssertEqual(bounds, CGRect(x: 2, y: 3, width: 10, height: 5))
+    }
+
     // MARK: - bounds
 
     func testArrowBoundsSpanEndpoints() {

@@ -49,6 +49,9 @@ public struct MarkupObject: Equatable, Identifiable {
         case text(String, CGRect)
         case freehand([CGPoint])
         case highlight([CGPoint])
+        /// A region whose underlying pixels are pixelated when the Capture is
+        /// flattened — redaction, destructive in the output.
+        case blur(CGRect)
     }
 
     public init(id: UUID = UUID(), kind: Kind, style: MarkupStyle = MarkupStyle()) {
@@ -73,6 +76,8 @@ public struct MarkupObject: Equatable, Identifiable {
             copy.kind = .freehand(points.map { CGPoint(x: $0.x + dx, y: $0.y + dy) })
         case .highlight(let points):
             copy.kind = .highlight(points.map { CGPoint(x: $0.x + dx, y: $0.y + dy) })
+        case .blur(let rect):
+            copy.kind = .blur(rect.offsetBy(dx: dx, dy: dy))
         }
         return copy
     }
@@ -91,6 +96,8 @@ public struct MarkupObject: Equatable, Identifiable {
             return rect.standardized
         case .freehand(let points), .highlight(let points):
             return Self.boundingBox(points).insetBy(dx: -pad, dy: -pad)
+        case .blur(let rect):
+            return rect.standardized
         }
     }
 

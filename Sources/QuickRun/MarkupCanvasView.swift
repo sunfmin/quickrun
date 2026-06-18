@@ -71,10 +71,10 @@ final class MarkupCanvasView: NSView, NSTextFieldDelegate {
         transform.scale(by: scale)
         transform.concat()
         for object in objects {
-            MarkupDrawing.draw(object.id == movingID ? object.translated(by: moveOffset) : object)
+            MarkupDrawing.draw(object.id == movingID ? object.translated(by: moveOffset) : object, image: image)
         }
         if let pendingKind {
-            MarkupDrawing.draw(MarkupObject(kind: pendingKind, style: activeStyle))
+            MarkupDrawing.draw(MarkupObject(kind: pendingKind, style: activeStyle), image: image)
         }
         NSGraphicsContext.restoreGraphicsState()
 
@@ -111,7 +111,7 @@ final class MarkupCanvasView: NSView, NSTextFieldDelegate {
             }
         case .text:
             beginText(at: viewPoint)
-        case .rectangle, .arrow, .freehand, .highlight:
+        case .rectangle, .arrow, .freehand, .highlight, .blur:
             dragStart = point
             strokePoints = [point]
             updatePending(to: point)
@@ -129,7 +129,7 @@ final class MarkupCanvasView: NSView, NSTextFieldDelegate {
         case .freehand, .highlight:
             strokePoints.append(point)
             updatePending(to: point)
-        case .rectangle, .arrow:
+        case .rectangle, .arrow, .blur:
             updatePending(to: point)
         default:
             break
@@ -141,7 +141,7 @@ final class MarkupCanvasView: NSView, NSTextFieldDelegate {
         switch tool {
         case .select:
             if let id = movingID, moveOffset != .zero { onMove?(id, moveOffset) }
-        case .rectangle, .arrow, .freehand, .highlight:
+        case .rectangle, .arrow, .freehand, .highlight, .blur:
             if let kind = pendingKind, Self.isCommittable(kind) { onCommit?(kind) }
         case .text:
             break
@@ -158,8 +158,9 @@ final class MarkupCanvasView: NSView, NSTextFieldDelegate {
         guard let start = dragStart else { return }
         switch tool {
         case .rectangle:
-            pendingKind = .rectangle(CGRect(x: min(start.x, point.x), y: min(start.y, point.y),
-                                            width: abs(point.x - start.x), height: abs(point.y - start.y)))
+            pendingKind = .rectangle(spanRect(start, point))
+        case .blur:
+            pendingKind = .blur(spanRect(start, point))
         case .arrow:
             pendingKind = .arrow(from: start, to: point)
         case .freehand:
@@ -171,9 +172,13 @@ final class MarkupCanvasView: NSView, NSTextFieldDelegate {
         }
     }
 
+    private func spanRect(_ a: CGPoint, _ b: CGPoint) -> CGRect {
+        CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+    }
+
     private static func isCommittable(_ kind: MarkupObject.Kind) -> Bool {
         switch kind {
-        case .rectangle(let rect):
+        case .rectangle(let rect), .blur(let rect):
             return rect.width > 2 && rect.height > 2
         case .arrow(let from, let to):
             return hypot(to.x - from.x, to.y - from.y) > 4

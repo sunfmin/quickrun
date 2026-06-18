@@ -22,12 +22,22 @@ enum MarkupDrawing {
     private static let highlightWidth: CGFloat = 18
     private static let highlightAlpha: CGFloat = 0.35
 
-    static func draw(_ object: MarkupObject) {
+    /// Draw `object` in the current context (set up as capture space). A blur
+    /// region needs the source `image` to sample; pass it whenever a blur could
+    /// be present (the live canvas and the flattening renderer both do).
+    static func draw(_ object: MarkupObject, image: NSImage? = nil) {
+        if case .blur(let rect) = object.kind {
+            if let image { Pixelate.draw(region: rect, of: image) }
+            return
+        }
+
         let color = NSColor(object.style.stroke)
         let width = CGFloat(object.style.lineWidth)
         color.setStroke()
 
         switch object.kind {
+        case .blur:
+            break // handled above
         case .rectangle(let rect):
             let path = NSBezierPath(rect: rect.standardized)
             path.lineWidth = width
@@ -93,6 +103,37 @@ enum MarkupDrawing {
     }
 }
 
+/// Destructively pixelates a region of a Capture — redaction. It samples the
+/// source down to one colour per block and redraws it blocky, so the fine
+/// detail is gone from the output, not merely hidden.
+enum Pixelate {
+    private static let blockSize: CGFloat = 10
+
+    /// Draw a pixelated copy of `image`'s `region` (capture space) into the
+    /// current context at `region`.
+    static func draw(region: CGRect, of image: NSImage) {
+        let rect = region.standardized
+        guard rect.width > 1, rect.height > 1 else { return }
+        let columns = max(1, Int((rect.width / blockSize).rounded()))
+        let rows = max(1, Int((rect.height / blockSize).rounded()))
+
+        // Average the region down to columns x rows.
+        let small = NSImage(size: NSSize(width: columns, height: rows))
+        small.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: columns, height: rows),
+                   from: rect, operation: .copy, fraction: 1)
+        small.unlockFocus()
+
+        // Redraw blocky over the region, destroying the original detail.
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.imageInterpolation = .none
+        small.draw(in: rect, from: NSRect(x: 0, y: 0, width: columns, height: rows),
+                   operation: .copy, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
 /// Flattens a Capture and its Markup into a single image.
 enum MarkupRenderer {
     /// Render `objects` over `image` at the image's native resolution, in
@@ -117,7 +158,7 @@ enum MarkupRenderer {
         NSGraphicsContext.current = context
         image.draw(in: NSRect(origin: .zero, size: logical))
         for object in objects {
-            MarkupDrawing.draw(object)
+            MarkupDrawing.draw(object, image: image)
         }
         context.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()

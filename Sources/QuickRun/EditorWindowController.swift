@@ -240,6 +240,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
             (.text, "textformat", "Text"),
             (.freehand, "pencil.tip", "Pen"),
             (.highlight, "highlighter", "Highlighter"),
+            (.blur, "square.grid.3x3.fill", "Blur / redact"),
         ]
         toolButtons = [:]
         let toolViews: [NSView] = tools.map { tool, symbol, tooltip in
