@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKeyMonitor?
     private var panel: PanelController?
     private var overlay: CaptureOverlayController?
+    private var captureMenuItem: NSMenuItem?
 
     private let store = UserDefaultsSourceStore(defaults: .standard)
     private let hotkeyStore = HotkeyStore(defaults: .standard)
@@ -49,6 +50,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.button?.title = "QR"
         }
         let menu = NSMenu()
+        // The hotkey's action, also reachable from the menu — the glyph in the
+        // title (e.g. ⌥D) reminds users of the shortcut without registering a
+        // competing key equivalent.
+        let captureItem = NSMenuItem(
+            title: captureMenuTitle(),
+            action: #selector(triggerFromMenu),
+            keyEquivalent: ""
+        )
+        captureItem.target = self
+        menu.addItem(captureItem)
+        captureMenuItem = captureItem
+        menu.addItem(.separator())
+
         let settingsItem = NSMenuItem(
             title: "Settings…",
             action: #selector(openSettings),
@@ -85,6 +99,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] in
             self?.trigger()
         }
+        captureMenuItem?.title = captureMenuTitle()
+    }
+
+    /// Menu title for the hotkey action, suffixed with the current hotkey glyph.
+    private func captureMenuTitle() -> String {
+        let hotkey = hotkeyStore.load() ?? defaultHotkey
+        return "Look Up or Capture  \(HotkeyFormatter.display(hotkey))"
+    }
+
+    @objc private func triggerFromMenu() {
+        trigger()
     }
 
     @objc private func openSettings() {
