@@ -78,28 +78,37 @@ enum MarkupDrawing {
         return path
     }
 
+    /// A tapered arrow drawn as one filled polygon: a near-pointed tail that
+    /// widens into a thicker shaft, then a broad head. "前粗后细" — bold at the
+    /// head, thin at the tail — and reads boldly even at the thinnest style width.
     private static func drawArrow(from: CGPoint, to: CGPoint, width: CGFloat, color: NSColor) {
-        let shaft = NSBezierPath()
-        shaft.move(to: from)
-        shaft.line(to: to)
-        shaft.lineWidth = width
-        shaft.lineCapStyle = .round
-        shaft.stroke()
+        let dx = to.x - from.x, dy = to.y - from.y
+        let length = max(hypot(dx, dy), 0.001)
+        let ux = dx / length, uy = dy / length   // unit direction, tail → head
+        let px = -uy, py = ux                     // unit perpendicular
 
-        let angle = atan2(to.y - from.y, to.x - from.x)
-        let headLength = max(12, width * 4)
-        let spread = CGFloat.pi / 7
-        let left = CGPoint(x: to.x - headLength * cos(angle - spread),
-                           y: to.y - headLength * sin(angle - spread))
-        let right = CGPoint(x: to.x - headLength * cos(angle + spread),
-                            y: to.y - headLength * sin(angle + spread))
-        let head = NSBezierPath()
-        head.move(to: to)
-        head.line(to: left)
-        head.line(to: right)
-        head.close()
+        // Proportions scale with the style width but stay bold at the minimum.
+        let headLength = min(length, max(20, width * 6))
+        let headHalf = max(10, width * 3.2)       // half-width of the head base (widest)
+        let neckHalf = headHalf * 0.45            // half-width of the shaft at the head (thick end)
+        let tailHalf = max(0.75, width * 0.4)     // half-width at the tail (thin end)
+
+        let neck = CGPoint(x: to.x - ux * headLength, y: to.y - uy * headLength)
+        func edge(_ p: CGPoint, _ half: CGFloat, _ sign: CGFloat) -> CGPoint {
+            CGPoint(x: p.x + px * half * sign, y: p.y + py * half * sign)
+        }
+
+        let arrow = NSBezierPath()
+        arrow.move(to: edge(from, tailHalf, 1))   // thin tail
+        arrow.line(to: edge(neck, neckHalf, 1))   // widening shaft to the neck
+        arrow.line(to: edge(neck, headHalf, 1))   // head wing
+        arrow.line(to: to)                        // tip
+        arrow.line(to: edge(neck, headHalf, -1))  // other head wing
+        arrow.line(to: edge(neck, neckHalf, -1))
+        arrow.line(to: edge(from, tailHalf, -1))
+        arrow.close()
         color.setFill()
-        head.fill()
+        arrow.fill()
     }
 }
 
