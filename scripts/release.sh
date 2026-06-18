@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Release build: universal QuickRun.app, signed with Developer ID + hardened
 # runtime, notarized by Apple, and stapled. Produces a distributable
-# dist/QuickRun.zip.
+# dist/QuickRun.zip, then installs it into /Applications and launches it
+# (quitting any running copy first).
 #
 # One-time notary credential setup (stores a keychain profile):
 #   xcrun notarytool store-credentials QuickRunNotary \
@@ -25,6 +26,20 @@ DEV_ID="${DEV_ID:-Developer ID Application: FENGMIN SUN (HL27PWAKDF)}"
 TEAM_ID="${TEAM_ID:-HL27PWAKDF}"
 SKIP_NOTARIZE="${SKIP_NOTARIZE:-0}"
 
+# Quit any running copy, replace the one in /Applications, and launch it.
+install_and_launch() {
+    local dest="/Applications/$APP_NAME.app"
+    echo "Quitting running $APP_NAME (if any)..."
+    osascript -e "tell application \"$APP_NAME\" to quit" >/dev/null 2>&1 || true
+    pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+    sleep 1   # let it exit so we can overwrite the bundle
+    echo "Installing to $dest..."
+    rm -rf "$dest"
+    ditto "$APP_PATH" "$dest"
+    echo "Launching $dest..."
+    open "$dest"
+}
+
 assemble_app release arm64 x86_64
 
 echo "Signing with Developer ID (hardened runtime)..."
@@ -36,6 +51,7 @@ ditto -c -k --keepParent "$APP_PATH" "$ZIP"
 
 if [ "$SKIP_NOTARIZE" = "1" ]; then
     echo "SKIP_NOTARIZE=1 — signed only. Bundle: $APP_PATH, zip: $ZIP"
+    install_and_launch
     exit 0
 fi
 
@@ -63,3 +79,5 @@ xcrun stapler validate "$APP_PATH"
 spctl --assess --type execute -vvv "$APP_PATH"
 
 echo "Done. Distributable: $ZIP"
+
+install_and_launch
