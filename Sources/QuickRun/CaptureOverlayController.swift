@@ -67,6 +67,7 @@ final class CaptureOverlayController: NSObject {
         view.onDeleteSelection = { [weak self] in self?.viewModel.deleteSelection(); self?.refresh() }
         view.onLookUpWord = { [weak self] word in self?.onLookUpWord?(word) }
         view.onRegionChanged = { [weak self] rect in self?.regionChanged(rect) }
+        view.onFinishedText = { [weak self] in self?.viewModel.selectTool(.select); self?.refresh() }
     }
 
     func show() {
@@ -218,7 +219,8 @@ final class CaptureOverlayController: NSObject {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try png.write(to: url)
-            close()
+            close() // drop the shield overlay first so Finder comes forward
+            NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
             NSSound.beep()
         }
@@ -285,7 +287,7 @@ final class CaptureOverlayController: NSObject {
         colorSwatch.action = #selector(showColorPopover)
         colorSwatch.toolTip = "Stroke colour"
 
-        let copy = makeButton(symbol: "checkmark.circle.fill", tooltip: "Copy to clipboard", action: #selector(copyTapped))
+        let copy = makeButton(symbol: "doc.on.clipboard.fill", tooltip: "Copy to clipboard", action: #selector(copyTapped))
         copy.contentTintColor = .systemGreen
         let save = makeButton(symbol: "square.and.arrow.down", tooltip: "Save to folder", action: #selector(saveTapped))
         let cancel = makeButton(symbol: "xmark.circle.fill", tooltip: "Cancel", action: #selector(cancelTapped))
@@ -426,6 +428,8 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     var onLookUpWord: ((String) -> Void)?
     /// The region was resized or moved — reposition the toolbar and re-OCR.
     var onRegionChanged: ((CGRect) -> Void)?
+    /// A text label finished (committed or dismissed) — revert to the Select tool.
+    var onFinishedText: (() -> Void)?
 
     private static let dimAlpha: CGFloat = 0.45
 
@@ -582,6 +586,12 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // An open text field: a click anywhere else commits it (discarding an
+        // empty one) and returns to the Select tool — the click is swallowed.
+        if textField != nil {
+            endText()
+            return
+        }
         let point = convert(event.locationInWindow, from: nil)
         guard isMarkupActive else {
             regionDragStart = point
@@ -780,11 +790,14 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         textOriginView = nil
         field.removeFromSuperview()
         window?.makeFirstResponder(self)
-        guard !string.isEmpty else { return }
 
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: activeStyle.fontSize)]
-        let size = (string as NSString).size(withAttributes: attributes)
-        onCommitMark?(.text(string, CGRect(origin: origin, size: size)))
+        if !string.isEmpty {
+            let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: activeStyle.fontSize)]
+            let size = (string as NSString).size(withAttributes: attributes)
+            onCommitMark?(.text(string, CGRect(origin: origin, size: size)))
+        }
+        // Placing (or abandoning) a label returns to the pointer (Select) tool.
+        onFinishedText?()
     }
 
     // MARK: - Keyboard
