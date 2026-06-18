@@ -15,7 +15,7 @@ brew install sunfmin/tap/quickrun
 The app is signed with a Developer ID and notarized by Apple, so it launches
 without Gatekeeper warnings.
 
-Or grab the `.zip` from the [latest release](https://github.com/sunfmin/quickrun/releases/latest).
+Or download the `.dmg` from the [latest release](https://github.com/sunfmin/quickrun/releases/latest) and drag **QuickRun** onto the **Applications** shortcut.
 
 ## Usage
 
