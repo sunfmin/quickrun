@@ -68,24 +68,47 @@ final class SwatchButton: NSButton {
     }
 }
 
-/// The colour popover: the inks people actually mark up with, one click away,
-/// plus a well for anything else.
+/// The colour popover: an ink palette of the colours people mark up with, laid
+/// out in rows by family — brights, then deeper muted tones, then a neutral
+/// ink→chalk row set off by a hairline. Seal red 朱 leads the grid; the chosen
+/// ink wears the seal-red ring. A curated grid, not the system colour panel,
+/// which can't show above the shield-level capture overlay.
 final class ColorPaletteViewController: NSViewController {
-    private let presets: [RGBAColor]
+    private let rows: [[RGBAColor]]
     private let current: RGBAColor
     private let onPick: (RGBAColor) -> Void
-    private let well = NSColorWell()
+
+    /// Six swatches per row at 24pt on 10pt gaps — the rule and rows share it.
+    private static let rowWidth: CGFloat = 6 * 24 + 5 * 10
 
     init(current: RGBAColor, onPick: @escaping (RGBAColor) -> Void) {
         self.current = current
         self.onPick = onPick
-        self.presets = [
-            .sealRed,
-            RGBAColor(red: 0.11, green: 0.11, blue: 0.12),  // ink
-            RGBAColor(red: 1, green: 1, blue: 1),           // chalk
-            RGBAColor(red: 0.18, green: 0.43, blue: 0.94),  // ocean
-            RGBAColor(red: 0.12, green: 0.67, blue: 0.41),  // jade
-            RGBAColor(red: 0.96, green: 0.65, blue: 0.14),  // amber
+        self.rows = [
+            [ // Brights — the everyday markup inks, seal red first.
+              .sealRed,
+              RGBAColor(red: 0.95, green: 0.45, blue: 0.18),  // orange
+              RGBAColor(red: 0.96, green: 0.65, blue: 0.14),  // amber
+              RGBAColor(red: 0.12, green: 0.67, blue: 0.41),  // jade
+              RGBAColor(red: 0.18, green: 0.43, blue: 0.94),  // ocean
+              RGBAColor(red: 0.49, green: 0.36, blue: 0.85),  // violet
+            ],
+            [ // Deeps — muted earth and jewel tones.
+              RGBAColor(red: 0.62, green: 0.12, blue: 0.18),  // crimson
+              RGBAColor(red: 0.55, green: 0.33, blue: 0.16),  // sienna
+              RGBAColor(red: 0.10, green: 0.45, blue: 0.45),  // teal
+              RGBAColor(red: 0.12, green: 0.22, blue: 0.45),  // navy
+              RGBAColor(red: 0.40, green: 0.16, blue: 0.40),  // plum
+              RGBAColor(red: 0.40, green: 0.45, blue: 0.16),  // olive
+            ],
+            [ // Neutrals — ink to chalk.
+              RGBAColor(red: 0.11, green: 0.11, blue: 0.12),  // ink
+              RGBAColor(red: 0.30, green: 0.31, blue: 0.34),  // graphite
+              RGBAColor(red: 0.48, green: 0.51, blue: 0.55),  // slate
+              RGBAColor(red: 0.65, green: 0.67, blue: 0.70),  // gray
+              RGBAColor(red: 0.82, green: 0.84, blue: 0.86),  // silver
+              RGBAColor(red: 1, green: 1, blue: 1),           // chalk
+            ],
         ]
         super.init(nibName: nil, bundle: nil)
     }
@@ -93,34 +116,20 @@ final class ColorPaletteViewController: NSViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func loadView() {
-        let swatches = presets.map { preset -> SwatchButton in
-            let swatch = SwatchButton(color: preset, diameter: 26, target: self, action: #selector(pickPreset(_:)))
-            swatch.isSelectedSwatch = preset == current
-            return swatch
-        }
-        let row = NSStackView(views: swatches)
-        row.orientation = .horizontal
-        row.spacing = 8
+        let bright = makeRow(rows[0])
+        let deep = makeRow(rows[1])
+        let neutral = makeRow(rows[2])
 
-        let customLabel = NSTextField(labelWithString: "Custom")
-        customLabel.font = .systemFont(ofSize: 11)
-        customLabel.textColor = .secondaryLabelColor
-        well.color = NSColor(current)
-        well.target = self
-        well.action = #selector(pickCustom(_:))
-        well.translatesAutoresizingMaskIntoConstraints = false
-        well.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        well.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        if #available(macOS 13.0, *) { well.colorWellStyle = .minimal }
-        let customRow = NSStackView(views: [customLabel, well])
-        customRow.orientation = .horizontal
-        customRow.spacing = 8
+        let rule = NSBox()
+        rule.boxType = .separator
+        rule.translatesAutoresizingMaskIntoConstraints = false
+        rule.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
 
-        let stack = NSStackView(views: [row, customRow])
+        let stack = NSStackView(views: [bright, deep, rule, neutral])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let container = NSView()
@@ -134,11 +143,19 @@ final class ColorPaletteViewController: NSViewController {
         view = container
     }
 
-    @objc private func pickPreset(_ sender: SwatchButton) {
-        onPick(sender.color)
+    private func makeRow(_ colors: [RGBAColor]) -> NSStackView {
+        let swatches = colors.map { color -> SwatchButton in
+            let swatch = SwatchButton(color: color, diameter: 24, target: self, action: #selector(pick(_:)))
+            swatch.isSelectedSwatch = color == current
+            return swatch
+        }
+        let row = NSStackView(views: swatches)
+        row.orientation = .horizontal
+        row.spacing = 10
+        return row
     }
 
-    @objc private func pickCustom(_ sender: NSColorWell) {
-        onPick(sender.color.rgba)
+    @objc private func pick(_ sender: SwatchButton) {
+        onPick(sender.color)
     }
 }
