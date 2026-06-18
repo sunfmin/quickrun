@@ -17,14 +17,56 @@ public enum RecognizedWordExtractor {
         var seen = Set<String>()
         var result: [String] = []
         for line in lines {
-            line.enumerateSubstrings(in: line.startIndex..<line.endIndex, options: .byWords) { substring, _, _, _ in
-                guard let word = substring, isLookupWorthy(word) else { return }
-                let key = word.lowercased()
-                guard seen.insert(key).inserted else { return }
-                result.append(word)
+            for segment in segments(in: line) {
+                guard isLookupWorthy(segment.text) else { continue }
+                let key = segment.text.lowercased()
+                guard seen.insert(key).inserted else { continue }
+                result.append(segment.text)
             }
         }
         return result
+    }
+
+    /// Split a recognized line into lookup-candidate words and their ranges.
+    ///
+    /// ICU word boundaries do the base segmentation, so CJK is segmented by
+    /// dictionary and English splits on whitespace and most punctuation. ICU
+    /// keeps a few symbols *inside* a word, though — a period (`QuickRun.app`)
+    /// and an underscore (`foo_bar`) — which for a screen full of file names and
+    /// directory paths fuses words that should be separately selectable. So each
+    /// ICU word is split again on any in-word character that isn't a letter,
+    /// digit, or apostrophe: `QuickRun.app` → `QuickRun`, `app`; `foo_bar` →
+    /// `foo`, `bar`; while contractions like `don't` stay whole. Each segment
+    /// carries its range so the caller can recover its on-image box.
+    public static func segments(in line: String) -> [(text: String, range: Range<String.Index>)] {
+        var result: [(text: String, range: Range<String.Index>)] = []
+        line.enumerateSubstrings(in: line.startIndex..<line.endIndex, options: .byWords) { substring, range, _, _ in
+            guard substring != nil else { return }
+            var runStart: String.Index?
+            var index = range.lowerBound
+            while index < range.upperBound {
+                if isWordCharacter(line[index]) {
+                    if runStart == nil { runStart = index }
+                } else if let start = runStart {
+                    result.append((String(line[start..<index]), start..<index))
+                    runStart = nil
+                }
+                index = line.index(after: index)
+            }
+            if let start = runStart {
+                result.append((String(line[start..<range.upperBound]), start..<range.upperBound))
+            }
+        }
+        return result
+    }
+
+    /// A character that belongs inside a word: a letter (including CJK), a digit,
+    /// or an apostrophe (so contractions aren't broken). Everything else —
+    /// `. _ / : @` and friends — separates words.
+    private static func isWordCharacter(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) || $0 == "'" || $0 == "\u{2019}"
+        }
     }
 
     /// Turn word-level OCR observations into the clickable Recognized words drawn

@@ -28,10 +28,11 @@ final class VisionTextRecognizer: TextRecognizing {
         for observation in request.results ?? [] {
             guard let candidate = observation.topCandidates(1).first else { continue }
             let string = candidate.string
-            string.enumerateSubstrings(in: string.startIndex..<string.endIndex, options: .byWords) { word, range, _, _ in
-                guard let word else { return }
-                let box = Self.wordBox(for: range, in: string, candidate: candidate, lineBox: observation.boundingBox)
-                result.append(OCRObservation(text: word, box: box))
+            // Shared segmentation (ICU + symbol split) so a path's segments are
+            // each their own word; boxes come from each segment's range.
+            for segment in RecognizedWordExtractor.segments(in: string) {
+                let box = Self.wordBox(for: segment.range, in: string, candidate: candidate, lineBox: observation.boundingBox)
+                result.append(OCRObservation(text: segment.text, box: box))
             }
         }
         return result

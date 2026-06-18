@@ -50,4 +50,35 @@ final class RecognizedWordExtractorTests: XCTestCase {
         XCTAssertEqual(RecognizedWordExtractor.words(from: ["", "   ", "\n\t"]), [])
         XCTAssertEqual(RecognizedWordExtractor.words(from: []), [])
     }
+
+    // MARK: - Splitting symbol-joined tokens (paths, file names)
+
+    func testSplitsFileNameOnTheDot() {
+        XCTAssertEqual(RecognizedWordExtractor.words(from: ["QuickRun.app"]), ["QuickRun", "app"])
+    }
+
+    func testSplitsDirectoryPathIntoSegments() {
+        XCTAssertEqual(
+            RecognizedWordExtractor.words(from: ["/opt/homebrew/Caskroom/quickrun"]),
+            ["opt", "homebrew", "Caskroom", "quickrun"]
+        )
+    }
+
+    func testSplitsOnUnderscore() {
+        XCTAssertEqual(RecognizedWordExtractor.words(from: ["foo_bar"]), ["foo", "bar"])
+    }
+
+    func testKeepsApostropheWordsWhileSplittingSymbols() {
+        XCTAssertEqual(RecognizedWordExtractor.words(from: ["can't.stop"]), ["can't", "stop"])
+    }
+
+    func testSegmentRangesRecoverTheirText() {
+        let line = "/Applications/QuickRun.app"
+        let segments = RecognizedWordExtractor.segments(in: line)
+        XCTAssertEqual(segments.map(\.text), ["Applications", "QuickRun", "app"])
+        // Each range must point back at its own text in the original line.
+        for segment in segments {
+            XCTAssertEqual(String(line[segment.range]), segment.text)
+        }
+    }
 }
