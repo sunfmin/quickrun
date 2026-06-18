@@ -15,8 +15,14 @@ import QuickRunKit
 final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private let panel: NSPanel
     private let queryField = NSTextField()
-    private let tabs = NSSegmentedControl()
+    private let lens = NSImageView()
+    private let settingsButton = NSButton()
+    private let tabBar = SourceTabBar(frame: .zero)
     private let webContainer = NSView()
+
+    /// Called when the masthead's gear is clicked — the Panel's only in-window
+    /// route to Settings, since the title bar (and any ⌘, menu) is hidden.
+    var onOpenSettings: (() -> Void)?
 
     private var viewModel: PanelViewModel?
     private var webViews: [WKWebView] = []
@@ -25,7 +31,22 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private var escMonitor: Any?
     private var isDismissing = false
 
-    private let topInset: CGFloat = 70
+    /// When dismissing into Settings, skip restoring focus to the prior app so
+    /// the Settings window stays frontmost.
+    private var suppressFocusRestore = false
+
+    /// Height of the translucent instrument bar (Query row + hairline + Source
+    /// row + hairline) above the web content.
+    private let topInset: CGFloat = 88
+
+    /// A full-bleed 1pt rule that adapts to light/dark, pinned by its top edge.
+    private func hairline(width: CGFloat, y: CGFloat) -> NSView {
+        let rule = NSView(frame: NSRect(x: 0, y: y, width: width, height: 1))
+        rule.wantsLayer = true
+        rule.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        rule.autoresizingMask = [.width, .minYMargin]
+        return rule
+    }
 
     /// Appended to each web view's User-Agent so it contains the "Safari" token.
     /// 必应词典 sniffs the UA: browsers it recognises as Safari get an HTML5
@@ -46,7 +67,7 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         let frame = NSRect(x: 0, y: 0, width: 820, height: 620)
         panel = NSPanel(
             contentRect: frame,
-            styleMask: [.titled, .closable, .resizable],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -58,22 +79,69 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         panel.hidesOnDeactivate = false
         panel.delegate = self
 
-        let content = NSView(frame: frame)
+        // A summoned HUD has no chrome: hide the title bar and traffic lights so
+        // the Query becomes the topmost element. Esc and click-away already
+        // dismiss, so the close button is redundant; drag by the bar instead.
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        panel.isMovableByWindowBackground = true
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            panel.standardWindowButton(button)?.isHidden = true
+        }
 
-        queryField.frame = NSRect(x: 8, y: frame.height - 36, width: frame.width - 16, height: 28)
+        // Translucent material for the instrument bar — fitting for a panel that
+        // floats over whatever you were reading. The opaque web views cover the
+        // rest, so the vibrancy only shows through the top bar.
+        let content = NSVisualEffectView(frame: frame)
+        content.material = .titlebar
+        content.state = .active
+        content.blendingMode = .behindWindow
+        content.autoresizingMask = [.width, .height]
+
+        let lensConfig = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+        lens.image = NSImage(systemSymbolName: "text.magnifyingglass", accessibilityDescription: "Look up")?
+            .withSymbolConfiguration(lensConfig)
+        lens.contentTintColor = .secondaryLabelColor
+        lens.frame = NSRect(x: 18, y: frame.height - 37, width: 22, height: 22)
+        lens.autoresizingMask = [.minYMargin]
+        content.addSubview(lens)
+
+        let gearConfig = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
+            .withSymbolConfiguration(gearConfig)
+        settingsButton.isBordered = false
+        settingsButton.setButtonType(.momentaryChange)
+        settingsButton.contentTintColor = .secondaryLabelColor
+        settingsButton.imagePosition = .imageOnly
+        settingsButton.toolTip = "Settings"
+        settingsButton.target = self
+        settingsButton.action = #selector(openSettings)
+        settingsButton.frame = NSRect(x: frame.width - 18 - 22, y: frame.height - 37, width: 22, height: 22)
+        settingsButton.autoresizingMask = [.minXMargin, .minYMargin]
+        content.addSubview(settingsButton)
+
+        queryField.frame = NSRect(x: 48, y: frame.height - 40, width: frame.width - 48 - 52, height: 28)
         queryField.autoresizingMask = [.width, .minYMargin]
         queryField.placeholderString = "Look up…"
-        queryField.font = .systemFont(ofSize: 15)
+        queryField.font = .quickRunSerif(ofSize: 22, weight: .medium)
+        queryField.textColor = .labelColor
+        queryField.isBordered = false
+        queryField.drawsBackground = false
+        queryField.focusRingType = .none
+        queryField.cell?.usesSingleLineMode = true
+        queryField.cell?.isScrollable = true
         queryField.target = self
         queryField.action = #selector(submit)
         content.addSubview(queryField)
 
-        tabs.frame = NSRect(x: 8, y: frame.height - 66, width: frame.width - 16, height: 24)
-        tabs.autoresizingMask = [.width, .minYMargin]
-        tabs.segmentStyle = .automatic
-        tabs.target = self
-        tabs.action = #selector(tabChanged)
-        content.addSubview(tabs)
+        content.addSubview(hairline(width: frame.width, y: frame.height - 53))
+
+        tabBar.frame = NSRect(x: 48, y: frame.height - 87, width: frame.width - 48 - 18, height: 34)
+        tabBar.autoresizingMask = [.width, .minYMargin]
+        tabBar.onSelect = { [weak self] index in self?.tabSelected(index) }
+        content.addSubview(tabBar)
+
+        content.addSubview(hairline(width: frame.width, y: frame.height - topInset))
 
         webContainer.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height - topInset)
         webContainer.autoresizingMask = [.width, .height]
@@ -103,11 +171,12 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     /// field blank with no navigation.
     func present(selection: String, sources: [Source]) {
         setupIfNeeded(for: sources)
+        suppressFocusRestore = false
         previousApp = NSWorkspace.shared.frontmostApplication
         queryField.stringValue = selection
 
         let request = viewModel?.open(selection: selection)
-        tabs.selectedSegment = viewModel?.activeIndex ?? 0
+        tabBar.select(viewModel?.activeIndex ?? 0, animated: false)
         showActiveWebView()
         if let request { execute(request) }
 
@@ -119,13 +188,19 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(queryField)
         queryField.selectText(nil)
+
+        // Tint the caret seal-red to match the active-Source rule.
+        if let editor = panel.fieldEditor(true, for: queryField) as? NSTextView {
+            editor.insertionPointColor = Palette.accent
+        }
     }
 
     func dismiss() {
         guard !isDismissing, panel.isVisible else { return }
         isDismissing = true
         panel.orderOut(nil)
-        previousApp?.activate()
+        if !suppressFocusRestore { previousApp?.activate() }
+        suppressFocusRestore = false
         isDismissing = false
     }
 
@@ -177,10 +252,7 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
             return webView
         }
 
-        tabs.segmentCount = sources.count
-        for (i, source) in sources.enumerated() {
-            tabs.setLabel(source.name, forSegment: i)
-        }
+        tabBar.configure(sources.map(\.name))
     }
 
     // MARK: - Actions
@@ -190,8 +262,14 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         execute(request)
     }
 
-    @objc private func tabChanged() {
-        let index = tabs.selectedSegment
+    @objc private func openSettings() {
+        // Settings is about to become key, which resigns the Panel and dismisses
+        // it — but focus should land on Settings, not bounce to the prior app.
+        suppressFocusRestore = true
+        onOpenSettings?()
+    }
+
+    private func tabSelected(_ index: Int) {
         showActiveWebView(index: index)
         if let request = viewModel?.switchTo(index) { execute(request) }
     }

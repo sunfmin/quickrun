@@ -102,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let selection = capturer.capture() ?? ""
         let controller = panel ?? PanelController()
+        controller.onOpenSettings = { [weak self] in self?.openSettings() }
         panel = controller
         controller.present(selection: selection, sources: store.load())
     }
