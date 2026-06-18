@@ -66,6 +66,7 @@ final class CaptureOverlayController: NSObject {
         view.onRedo = { [weak self] in self?.viewModel.redo(); self?.refresh() }
         view.onDeleteSelection = { [weak self] in self?.viewModel.deleteSelection(); self?.refresh() }
         view.onLookUpWord = { [weak self] word in self?.onLookUpWord?(word) }
+        view.onRegionChanged = { [weak self] rect in self?.regionChanged(rect) }
     }
 
     func show() {
@@ -84,6 +85,12 @@ final class CaptureOverlayController: NSObject {
         scheduleRecognition()
     }
 
+    /// The region was resized or moved: keep the toolbar by it and re-OCR.
+    private func regionChanged(_ rect: CGRect) {
+        positionToolbar(for: rect)
+        scheduleRecognition()
+    }
+
     // MARK: - Recognized words (OCR the region into clickable hit areas)
 
     /// OCR the current region off the main thread (debounced) and place each
@@ -91,13 +98,13 @@ final class CaptureOverlayController: NSObject {
     /// region is committed, and (once resize lands in #18) whenever it changes.
     private func scheduleRecognition() {
         recognizeWork?.cancel()
-        guard let region = view.regionRect,
-              let cropped = frozen.image.cropping(to: pixelRect(for: region)) else {
+        guard let region = view.regionRect else {
             view.words = []
             return
         }
+        let pixels = pixelRect(for: region)
         let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
+            guard let self, let cropped = self.frozen.image.cropping(to: pixels) else { return }
             let observations = self.recognizer.recognizeWords(in: cropped)
             let words = RecognizedWordExtractor.clickableWords(from: observations)
             // Map each box (normalized to the region image, bottom-left origin)
@@ -376,6 +383,14 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     private var regionDragStart: CGPoint?
     private var liveRegion: RegionSelection?
 
+    // Region resize/move state (post-commit, Select tool).
+    private var resizingHandle: RegionSelection.Handle?
+    private var movingRegion = false
+    private var regionMoveStart: CGPoint?
+    private var regionMoveOrigin: CGRect?
+    private static let handleTolerance: CGFloat = 12
+    private static let handleSize: CGFloat = 8
+
     // Markup-drag state (post-commit).
     private var markDragStart: CGPoint?
     private var strokePoints: [CGPoint] = []
@@ -397,6 +412,8 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     var onDeleteSelection: (() -> Void)?
     /// A Recognized word was clicked — look it up in the Panel.
     var onLookUpWord: ((String) -> Void)?
+    /// The region was resized or moved — reposition the toolbar and re-OCR.
+    var onRegionChanged: ((CGRect) -> Void)?
 
     private static let dimAlpha: CGFloat = 0.45
 
@@ -476,6 +493,11 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
             border.stroke()
         }
 
+        // Resize handles, grabbable only in the Select tool, once committed.
+        if let rect = committedRect, tool == .select, liveRegion == nil {
+            drawRegionHandles(rect)
+        }
+
         if let selected = objects.first(where: { $0.id == selectedID }) {
             let shown = selected.id == movingID ? selected.translated(by: moveOffset) : selected
             drawSelectionHandles(around: shown.bounds)
@@ -490,6 +512,25 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         NSColor.selectedControlColor.setStroke()
         outline.setLineDash([4, 3], count: 2, phase: 0)
         outline.stroke()
+    }
+
+    private func drawRegionHandles(_ rect: CGRect) {
+        let selection = RegionSelection(bounds: bounds, rect: rect)
+        let size = Self.handleSize
+        for handle in RegionSelection.Handle.allCases {
+            let center = selection.handlePoint(handle)
+            let box = CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
+            NSColor.white.setFill()
+            NSBezierPath(rect: box).fill()
+            Palette.accent.setStroke()
+            let outline = NSBezierPath(rect: box)
+            outline.lineWidth = 1.5
+            outline.stroke()
+        }
+    }
+
+    private var committedSelection: RegionSelection? {
+        committedRect.map { RegionSelection(bounds: bounds, rect: $0) }
     }
 
     private func drawHint() {
@@ -515,27 +556,54 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
             hoveredWord = index
             needsDisplay = true
         }
-        (index != nil ? NSCursor.pointingHand : NSCursor.arrow).set()
+        // Cursor reads the affordance under the pointer: resize on a handle, a
+        // grab hand inside the region, a finger over a word.
+        if tool == .select, committedSelection?.handle(at: point, tolerance: Self.handleTolerance) != nil {
+            NSCursor.crosshair.set()
+        } else if index != nil {
+            NSCursor.pointingHand.set()
+        } else if tool == .select, committedRect?.contains(point) == true {
+            NSCursor.openHand.set()
+        } else {
+            NSCursor.arrow.set()
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        guard isMarkupActive else {
+            regionDragStart = point
+            liveRegion = nil
+            needsDisplay = true
+            return
+        }
+        // A region handle resizes — highest priority, so an edge near a word or
+        // mark is still grabbable.
+        if tool == .select, let handle = committedSelection?.handle(at: point, tolerance: Self.handleTolerance) {
+            resizingHandle = handle
+            words = [] // boxes are stale until OCR re-runs for the new region
+            return
+        }
         // A Recognized word looked up takes priority over starting a mark.
         if let index = wordIndex(at: point) {
             onLookUpWord?(words[index].text)
             return
         }
-        if isMarkupActive {
-            markupMouseDown(at: point)
-        } else {
-            regionDragStart = point
-            liveRegion = nil
-        }
+        markupMouseDown(at: point)
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if let handle = resizingHandle, let rect = committedRect {
+            apply(RegionSelection(bounds: bounds, rect: rect).resized(handle, to: point))
+            return
+        }
+        if movingRegion, let start = regionMoveStart, let origin = regionMoveOrigin {
+            let offset = CGSize(width: point.x - start.x, height: point.y - start.y)
+            apply(RegionSelection(bounds: bounds, rect: origin).moved(by: offset))
+            return
+        }
         if isMarkupActive {
             markupMouseDragged(to: point)
         } else if let start = regionDragStart {
@@ -545,6 +613,15 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if resizingHandle != nil || movingRegion {
+            resizingHandle = nil
+            movingRegion = false
+            regionMoveStart = nil
+            regionMoveOrigin = nil
+            if let rect = committedRect { onRegionChanged?(rect) } // settle → re-OCR
+            needsDisplay = true
+            return
+        }
         if isMarkupActive {
             markupMouseUp()
         } else {
@@ -560,6 +637,14 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
+    /// Adopt a resized/moved region and tell the controller live (so the toolbar
+    /// tracks it); OCR is rescheduled and debounced there.
+    private func apply(_ selection: RegionSelection) {
+        committedRect = selection.rect
+        onRegionChanged?(selection.rect)
+        needsDisplay = true
+    }
+
     // MARK: - Markup mouse (frozen-screen space; identity mapping)
 
     private func markupMouseDown(at point: CGPoint) {
@@ -570,7 +655,14 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
                 movingID = hit.id
                 markDragStart = point
                 moveOffset = .zero
+            } else if let rect = committedRect, rect.contains(point) {
+                // Empty space inside the region → drag moves the whole region.
+                onSelectMark?(nil)
+                movingRegion = true
+                regionMoveStart = point
+                regionMoveOrigin = rect
             } else {
+                // Outside the region → deselect (and the Panel closes on resign).
                 onSelectMark?(nil)
                 markDragStart = nil
                 movingID = nil

@@ -44,6 +44,67 @@ public struct RegionSelection: Equatable {
         rect.width < Self.minSize || rect.height < Self.minSize
     }
 
+    // MARK: - Handles (resize / move)
+
+    /// The eight drag points around the region: the four corners and the four
+    /// edge midpoints.
+    public enum Handle: CaseIterable {
+        case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left
+
+        var movesLeft: Bool { self == .topLeft || self == .left || self == .bottomLeft }
+        var movesRight: Bool { self == .topRight || self == .right || self == .bottomRight }
+        var movesTop: Bool { self == .topLeft || self == .top || self == .topRight }
+        var movesBottom: Bool { self == .bottomLeft || self == .bottom || self == .bottomRight }
+    }
+
+    /// The center of `handle` in bounds space (bottom-left origin), for drawing
+    /// the handle and hit-testing it.
+    public func handlePoint(_ handle: Handle) -> CGPoint {
+        let x = handle.movesLeft ? rect.minX : (handle.movesRight ? rect.maxX : rect.midX)
+        let y = handle.movesBottom ? rect.minY : (handle.movesTop ? rect.maxY : rect.midY)
+        return CGPoint(x: x, y: y)
+    }
+
+    /// The handle within `tolerance` of `point`, preferring the nearest — or
+    /// `nil` if the point is on none. Only meaningful for a non-empty region.
+    public func handle(at point: CGPoint, tolerance: CGFloat) -> Handle? {
+        guard !isEmpty else { return nil }
+        var best: (handle: Handle, distance: CGFloat)?
+        for handle in Handle.allCases {
+            let p = handlePoint(handle)
+            let distance = hypot(p.x - point.x, p.y - point.y)
+            if distance <= tolerance, best == nil || distance < best!.distance {
+                best = (handle, distance)
+            }
+        }
+        return best?.handle
+    }
+
+    /// Resize by dragging `handle` to `point`. The moved edges follow the cursor,
+    /// clamped to `bounds`, and the region keeps at least `minSize` in each axis
+    /// (the dragged edge stops rather than crossing or collapsing).
+    public func resized(_ handle: Handle, to point: CGPoint) -> RegionSelection {
+        let p = Self.clampPoint(point, to: bounds)
+        var minX = rect.minX, maxX = rect.maxX, minY = rect.minY, maxY = rect.maxY
+
+        if handle.movesLeft { minX = min(p.x, maxX - Self.minSize) }
+        if handle.movesRight { maxX = max(p.x, minX + Self.minSize) }
+        if handle.movesBottom { minY = min(p.y, maxY - Self.minSize) }
+        if handle.movesTop { maxY = max(p.y, minY + Self.minSize) }
+
+        let resized = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        return RegionSelection(bounds: bounds, rect: resized)
+    }
+
+    /// Move the whole region by `offset`, clamped so it cannot leave `bounds`
+    /// (the size is preserved — it slides, it does not shrink, at an edge).
+    public func moved(by offset: CGSize) -> RegionSelection {
+        var moved = rect.offsetBy(dx: offset.width, dy: offset.height)
+        moved.origin.x = min(max(moved.minX, bounds.minX), bounds.maxX - moved.width)
+        moved.origin.y = min(max(moved.minY, bounds.minY), bounds.maxY - moved.height)
+        return RegionSelection(bounds: bounds, rect: moved)
+    }
+
     // MARK: - Clamping
 
     /// Confine `rect` to `bounds` by intersection, falling back to an empty rect
