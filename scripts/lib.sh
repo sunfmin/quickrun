@@ -4,8 +4,8 @@
 APP_NAME=QuickRun
 BUNDLE_ID=jp.theplant.quickrun
 DIST=dist
-SHORT_VERSION=0.1.0
-BUILD_VERSION=1
+SHORT_VERSION="${SHORT_VERSION:-0.2.0}"
+BUILD_VERSION="${BUILD_VERSION:-2}"
 
 # assemble_app <config> [arch...]
 # Builds the binary and assembles an UNSIGNED dist/QuickRun.app.
