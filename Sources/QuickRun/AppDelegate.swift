@@ -6,6 +6,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var hotKey: HotKeyMonitor?
     private var panel: PanelController?
+    private var editor: EditorWindowController?
+
+    private let regionCapturer: RegionCapturer = ScreenCaptureRegionCapturer()
 
     private let store = UserDefaultsSourceStore(defaults: .standard)
     private let hotkeyStore = HotkeyStore(defaults: .standard)
@@ -101,10 +104,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let selection = capturer.capture() ?? ""
+        // Nothing selected: there is no word to look up, so capture a screen
+        // region instead of opening a Panel to type into.
+        guard !selection.isEmpty else {
+            startCapture()
+            return
+        }
         let controller = panel ?? PanelController()
         controller.onOpenSettings = { [weak self] in self?.openSettings() }
         panel = controller
         controller.present(selection: selection, sources: store.load())
+    }
+
+    /// Capture a screen region and open it in the Editor. A cancelled capture
+    /// (Esc) yields no image and simply returns the user to where they were.
+    private func startCapture() {
+        regionCapturer.capture { [weak self] image in
+            guard let self, let image else { return }
+            let editor = EditorWindowController(image: image)
+            editor.onClosed = { [weak self] in self?.editor = nil }
+            self.editor = editor
+            editor.show()
+        }
     }
 
     private func presentPermissionNeeded() {
