@@ -168,6 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onOpenSettings = { [weak self] in self?.openSettings() }
         panel = controller
         controller.present(selection: query, sources: store.load())
+        // The overlay sits at the shield level; host the Panel above it so the
+        // result isn't hidden behind the frozen capture.
+        overlay?.placePanelAbove(controller.hostWindow)
     }
 
     private func presentScreenRecordingNeeded() {

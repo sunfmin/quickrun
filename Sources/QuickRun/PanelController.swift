@@ -207,6 +207,10 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     /// Whether the Panel is currently on screen.
     var isVisible: Bool { panel.isVisible }
 
+    /// The Panel's window, so a capture overlay can host it above the frozen
+    /// screen (which sits at the shield level, above ordinary floating windows).
+    var hostWindow: NSWindow { panel }
+
     /// Look up whatever text is selected inside the active web view (used when the
     /// hotkey fires while QuickRun is already frontmost). Reads the selection via
     /// JavaScript — no synthetic copy — so it can't beep or pick up the wrong text.

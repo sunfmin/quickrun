@@ -75,6 +75,15 @@ final class CaptureOverlayController: NSObject {
         window.makeFirstResponder(view)
     }
 
+    /// Host a looked-up word's Panel above the overlay. The overlay sits at the
+    /// shield window level (above the menu bar/Dock), so a plain floating Panel
+    /// would open behind it; as a child window it renders above, and still
+    /// dismisses on resign when the user clicks back onto the overlay.
+    func placePanelAbove(_ panelWindow: NSWindow) {
+        guard panelWindow.parent !== window else { return }
+        window.addChildWindow(panelWindow, ordered: .above)
+    }
+
     // MARK: - Region → markup
 
     private func regionCommitted(_ rect: CGRect) {
@@ -216,7 +225,10 @@ final class CaptureOverlayController: NSObject {
     }
 
     private func close() {
-        if let toolbar { window.removeChildWindow(toolbar); toolbar.orderOut(nil) }
+        // Un-parent every child (toolbar, and any looked-up Panel) so they
+        // aren't tied to the overlay once it goes away.
+        window.childWindows?.forEach { window.removeChildWindow($0) }
+        toolbar?.orderOut(nil)
         window.orderOut(nil)
         onClosed?()
     }

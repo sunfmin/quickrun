@@ -30,12 +30,30 @@ final class VisionTextRecognizer: TextRecognizing {
             let string = candidate.string
             string.enumerateSubstrings(in: string.startIndex..<string.endIndex, options: .byWords) { word, range, _, _ in
                 guard let word else { return }
-                // Vision's per-substring box is normalized to the image, bottom-
-                // left origin; fall back to the line box if it can't be derived.
-                let box = (try? candidate.boundingBox(for: range))?.boundingBox ?? observation.boundingBox
+                let box = Self.wordBox(for: range, in: string, candidate: candidate, lineBox: observation.boundingBox)
                 result.append(OCRObservation(text: word, box: box))
             }
         }
         return result
+    }
+
+    /// The box for the word at `range`, normalized to the image (bottom-left
+    /// origin). Prefers Vision's precise per-substring box; when that can't be
+    /// derived, slices the line box by the word's character span rather than
+    /// returning the whole line — so a word's hit area never swallows its
+    /// neighbours (and is exact for monospace text like a terminal).
+    private static func wordBox(for range: Range<String.Index>, in string: String,
+                                candidate: VNRecognizedText, lineBox: CGRect) -> CGRect {
+        if let observation = try? candidate.boundingBox(for: range) {
+            return observation.boundingBox
+        }
+        let total = string.count
+        guard total > 0 else { return lineBox }
+        let start = string.distance(from: string.startIndex, to: range.lowerBound)
+        let length = string.distance(from: range.lowerBound, to: range.upperBound)
+        return CGRect(x: lineBox.minX + CGFloat(start) / CGFloat(total) * lineBox.width,
+                      y: lineBox.minY,
+                      width: CGFloat(length) / CGFloat(total) * lineBox.width,
+                      height: lineBox.height)
     }
 }

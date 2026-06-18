@@ -30,17 +30,15 @@ public enum RecognizedWordExtractor {
     /// Turn word-level OCR observations into the clickable Recognized words drawn
     /// on the Capture, keeping each word's box. The same noise filter as
     /// `words(from:)` decides which become clickable — pure numbers and lone
-    /// Latin letters are dropped, single CJK characters are kept — and words are
-    /// de-duplicated case-insensitively, keeping the first (and its box) in
-    /// reading order. Whitespace-only observations are ignored.
+    /// Latin letters are dropped, single CJK characters are kept. Unlike the
+    /// sidebar's `words(from:)`, occurrences are NOT de-duplicated: every place a
+    /// word appears on the Capture is its own clickable hit area. Whitespace-only
+    /// observations are ignored.
     public static func clickableWords(from observations: [OCRObservation]) -> [RecognizedWord] {
-        var seen = Set<String>()
         var result: [RecognizedWord] = []
         for observation in observations {
             let word = observation.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard isLookupWorthy(word) else { continue }
-            let key = word.lowercased()
-            guard seen.insert(key).inserted else { continue }
             result.append(RecognizedWord(text: word, box: observation.box))
         }
         return result

@@ -40,13 +40,20 @@ final class ClickableWordsTests: XCTestCase {
         XCTAssertEqual(words.map(\.text), ["时", "好"])
     }
 
-    func testDeduplicatesCaseInsensitivelyKeepingFirstBox() {
-        let first = CGRect(x: 0, y: 0, width: 0.2, height: 0.1)
-        let later = CGRect(x: 0.5, y: 0.5, width: 0.2, height: 0.1)
+    func testKeepsEveryOccurrenceWithItsOwnBox() {
+        // In-place words are not de-duplicated: each spot a word appears on the
+        // Capture is independently clickable, so all three boxes survive.
+        let a = CGRect(x: 0, y: 0, width: 0.2, height: 0.1)
+        let b = CGRect(x: 0.5, y: 0.5, width: 0.2, height: 0.1)
+        let c = CGRect(x: 0.5, y: 0.8, width: 0.2, height: 0.1)
         let words = RecognizedWordExtractor.clickableWords(from: [
-            obs("The", first), obs("the", later), obs("THE", later),
+            obs("The", a), obs("the", b), obs("THE", c),
         ])
-        XCTAssertEqual(words, [RecognizedWord(text: "The", box: first)])
+        XCTAssertEqual(words, [
+            RecognizedWord(text: "The", box: a),
+            RecognizedWord(text: "the", box: b),
+            RecognizedWord(text: "THE", box: c),
+        ])
     }
 
     func testPreservesObservationOrder() {
