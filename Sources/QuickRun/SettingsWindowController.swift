@@ -7,6 +7,7 @@ import QuickRunKit
 final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private let store: UserDefaultsSourceStore
     private let hotkeyStore: HotkeyStore
+    private let saveLocationStore: SaveLocationStore
     private let defaultHotkey: Hotkey
     private let onHotkeyChanged: () -> Void
     private var sources: [Source]
@@ -16,6 +17,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     private let grantButton = NSButton()
     private var recordMonitor: Any?
     private let permissionLabel = NSTextField(labelWithString: "")
+    private let saveLocationLabel = NSTextField(labelWithString: "")
 
     private static let nameColumn = NSUserInterfaceItemIdentifier("name")
     private static let urlColumn = NSUserInterfaceItemIdentifier("url")
@@ -23,16 +25,18 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     init(
         store: UserDefaultsSourceStore,
         hotkeyStore: HotkeyStore,
+        saveLocationStore: SaveLocationStore,
         defaultHotkey: Hotkey,
         onHotkeyChanged: @escaping () -> Void
     ) {
         self.store = store
         self.hotkeyStore = hotkeyStore
+        self.saveLocationStore = saveLocationStore
         self.defaultHotkey = defaultHotkey
         self.onHotkeyChanged = onHotkeyChanged
         self.sources = store.load()
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 520),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -48,6 +52,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         sources = store.load()
         tableView.reloadData()
         updatePermissionStatus()
+        updateSaveLocationLabel()
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -56,19 +61,19 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     // MARK: - UI
 
     private func buildUI() {
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 480))
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 520))
         content.autoresizingMask = [.width, .height]
 
         // ── General ──────────────────────────────────────────────────────────
-        content.addSubview(sectionHeader("General", y: 440))
+        content.addSubview(sectionHeader("General", y: 480))
 
         let hotkeyLabel = NSTextField(labelWithString: "Global hotkey")
         hotkeyLabel.font = .systemFont(ofSize: 13)
-        hotkeyLabel.frame = NSRect(x: 20, y: 408, width: 110, height: 22)
+        hotkeyLabel.frame = NSRect(x: 20, y: 448, width: 110, height: 22)
         hotkeyLabel.autoresizingMask = [.minYMargin]
         content.addSubview(hotkeyLabel)
 
-        hotkeyButton.frame = NSRect(x: 140, y: 404, width: 170, height: 26)
+        hotkeyButton.frame = NSRect(x: 140, y: 444, width: 170, height: 26)
         hotkeyButton.autoresizingMask = [.minYMargin]
         hotkeyButton.bezelStyle = .rounded
         hotkeyButton.target = self
@@ -76,19 +81,19 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         updateHotkeyButtonTitle()
         content.addSubview(hotkeyButton)
 
-        content.addSubview(caption("Click, then press the new combination.", x: 142, y: 384, width: 420))
+        content.addSubview(caption("Click, then press the new combination.", x: 142, y: 424, width: 420))
 
         let accessibilityLabel = NSTextField(labelWithString: "Accessibility")
         accessibilityLabel.font = .systemFont(ofSize: 13)
-        accessibilityLabel.frame = NSRect(x: 20, y: 352, width: 110, height: 22)
+        accessibilityLabel.frame = NSRect(x: 20, y: 392, width: 110, height: 22)
         accessibilityLabel.autoresizingMask = [.minYMargin]
         content.addSubview(accessibilityLabel)
 
-        permissionLabel.frame = NSRect(x: 142, y: 352, width: 210, height: 22)
+        permissionLabel.frame = NSRect(x: 142, y: 392, width: 210, height: 22)
         permissionLabel.autoresizingMask = [.minYMargin]
         content.addSubview(permissionLabel)
 
-        grantButton.frame = NSRect(x: 370, y: 350, width: 210, height: 26)
+        grantButton.frame = NSRect(x: 370, y: 390, width: 210, height: 26)
         grantButton.title = "Open Accessibility Settings"
         grantButton.bezelStyle = .rounded
         grantButton.autoresizingMask = [.minYMargin, .minXMargin]
@@ -96,6 +101,29 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         grantButton.action = #selector(openPermissionPane)
         content.addSubview(grantButton)
         updatePermissionStatus()
+
+        let saveLabel = NSTextField(labelWithString: "Save screenshots to")
+        saveLabel.font = .systemFont(ofSize: 13)
+        saveLabel.frame = NSRect(x: 20, y: 356, width: 150, height: 22)
+        saveLabel.autoresizingMask = [.minYMargin]
+        content.addSubview(saveLabel)
+
+        saveLocationLabel.font = .systemFont(ofSize: 12)
+        saveLocationLabel.textColor = .secondaryLabelColor
+        saveLocationLabel.lineBreakMode = .byTruncatingMiddle
+        saveLocationLabel.frame = NSRect(x: 176, y: 357, width: 250, height: 20)
+        saveLocationLabel.autoresizingMask = [.minYMargin]
+        content.addSubview(saveLocationLabel)
+
+        let chooseButton = NSButton()
+        chooseButton.title = "Choose…"
+        chooseButton.bezelStyle = .rounded
+        chooseButton.frame = NSRect(x: 446, y: 354, width: 134, height: 26)
+        chooseButton.autoresizingMask = [.minYMargin, .minXMargin]
+        chooseButton.target = self
+        chooseButton.action = #selector(chooseSaveLocation)
+        content.addSubview(chooseButton)
+        updateSaveLocationLabel()
 
         let divider = NSView(frame: NSRect(x: 20, y: 336, width: 560, height: 1))
         divider.wantsLayer = true
@@ -293,6 +321,26 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
 
     @objc private func openPermissionPane() {
         AccessibilityPermission.openSettingsPane()
+    }
+
+    // MARK: - Save location
+
+    private func updateSaveLocationLabel() {
+        let path = saveLocationStore.folder().path
+        saveLocationLabel.stringValue = (path as NSString).abbreviatingWithTildeInPath
+    }
+
+    @objc private func chooseSaveLocation() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = saveLocationStore.folder()
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url {
+            saveLocationStore.setFolder(url)
+            updateSaveLocationLabel()
+        }
     }
 
     // MARK: - Hotkey recorder

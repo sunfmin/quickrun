@@ -13,9 +13,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let store = UserDefaultsSourceStore(defaults: .standard)
     private let hotkeyStore = HotkeyStore(defaults: .standard)
+    private let saveLocationStore = SaveLocationStore(defaults: .standard)
     private lazy var settings = SettingsWindowController(
         store: store,
         hotkeyStore: hotkeyStore,
+        saveLocationStore: saveLocationStore,
         defaultHotkey: defaultHotkey,
         onHotkeyChanged: { [weak self] in self?.registerHotkey() }
     )
@@ -122,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startCapture() {
         regionCapturer.capture { [weak self] image in
             guard let self, let image else { return }
-            let editor = EditorWindowController(image: image)
+            let editor = EditorWindowController(image: image, saveLocation: self.saveLocationStore)
             editor.onClosed = { [weak self] in self?.editor = nil }
             editor.onLookUp = { [weak self] word in self?.lookUp(word) }
             self.editor = editor

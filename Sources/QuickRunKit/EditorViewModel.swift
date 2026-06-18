@@ -15,6 +15,7 @@ public enum MarkupTool: Equatable {
 public enum EditorIntent: Equatable {
     case lookUp(String)
     case copyToClipboard
+    case saveToFile
 }
 
 /// Drives the Editor's pure state: the Recognized words, the active tool, the
@@ -107,6 +108,8 @@ public final class EditorViewModel {
     // MARK: - Export
 
     public func copy() -> EditorIntent { .copyToClipboard }
+
+    public func save() -> EditorIntent { .saveToFile }
 
     // MARK: -
 

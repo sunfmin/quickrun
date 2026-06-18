@@ -37,6 +37,10 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(EditorViewModel().copy(), .copyToClipboard)
     }
 
+    func testSaveYieldsSaveIntent() {
+        XCTAssertEqual(EditorViewModel().save(), .saveToFile)
+    }
+
     func testStartsOnSelectTool() {
         XCTAssertEqual(EditorViewModel().currentTool, .select)
     }

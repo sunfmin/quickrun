@@ -13,6 +13,7 @@ import QuickRunKit
 final class EditorWindowController: NSObject, NSWindowDelegate {
     private let window: NSWindow
     private let image: NSImage
+    private let saveLocation: SaveLocationStore
     private let canvas = MarkupCanvasView()
     private let wordsStack = NSStackView()
     private let statusLabel = NSTextField(labelWithString: "Recognizing…")
@@ -28,8 +29,9 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     private static let sidebarWidth: CGFloat = 220
     private static let toolbarHeight: CGFloat = 46
 
-    init(image: NSImage) {
+    init(image: NSImage, saveLocation: SaveLocationStore) {
         self.image = image
+        self.saveLocation = saveLocation
         let windowSize = Self.windowSize(for: image)
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: windowSize),
@@ -104,6 +106,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     @objc private func redoTapped() { viewModel.redo(); refresh() }
     @objc private func deleteTapped() { viewModel.deleteSelection(); refresh() }
     @objc private func copyTapped() { execute(viewModel.copy()) }
+    @objc private func saveTapped() { execute(viewModel.save()) }
 
     @objc private func colorChanged(_ sender: NSColorWell) {
         viewModel.setStyle(MarkupStyle(stroke: sender.color.rgba, lineWidth: viewModel.defaultStyle.lineWidth))
@@ -127,6 +130,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
             onLookUp?(query)
         case .copyToClipboard:
             copyFlattenedToClipboard()
+        case .saveToFile:
+            saveFlattenedToFile()
         }
     }
 
@@ -137,6 +142,21 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
             pasteboard.setData(png, forType: .png)
         } else {
             pasteboard.writeObjects([MarkupRenderer.flatten(image: image, objects: viewModel.document.objects)])
+        }
+    }
+
+    private func saveFlattenedToFile() {
+        guard let png = MarkupRenderer.pngData(image: image, objects: viewModel.document.objects) else {
+            NSSound.beep()
+            return
+        }
+        let folder = saveLocation.folder()
+        let url = folder.appendingPathComponent(captureFilename(date: Date()))
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try png.write(to: url)
+        } catch {
+            NSSound.beep()
         }
     }
 
@@ -246,14 +266,19 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         leading.translatesAutoresizingMaskIntoConstraints = false
 
         let copy = makeButton(symbol: "doc.on.doc", tooltip: "Copy to clipboard", action: #selector(copyTapped))
+        let save = makeButton(symbol: "square.and.arrow.down", tooltip: "Save to folder", action: #selector(saveTapped))
+        let trailing = NSStackView(views: [copy, save])
+        trailing.orientation = .horizontal
+        trailing.spacing = 8
+        trailing.translatesAutoresizingMaskIntoConstraints = false
 
         bar.addSubview(leading)
-        bar.addSubview(copy)
+        bar.addSubview(trailing)
         NSLayoutConstraint.activate([
             leading.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 14),
             leading.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            copy.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -14),
-            copy.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            trailing.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -14),
+            trailing.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
         ])
         return bar
     }
