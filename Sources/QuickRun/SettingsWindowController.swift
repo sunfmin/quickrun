@@ -16,6 +16,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     private let hotkeyButton = NSButton()
     private let grantButton = NSButton()
     private var recordMonitor: Any?
+    private var libraryPicker: SourceLibraryPickerController?
     private let permissionLabel = NSTextField(labelWithString: "")
     private let saveLocationLabel = NSTextField(labelWithString: "")
 
@@ -186,6 +187,15 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         toolbar.autoresizingMask = [.maxXMargin, .maxYMargin]
         content.addSubview(toolbar)
 
+        let libraryButton = NSButton()
+        libraryButton.title = "Add from Library…"
+        libraryButton.bezelStyle = .rounded
+        libraryButton.frame = NSRect(x: 164, y: 16, width: 160, height: 28)
+        libraryButton.autoresizingMask = [.maxXMargin, .maxYMargin]
+        libraryButton.target = self
+        libraryButton.action = #selector(openLibrary)
+        content.addSubview(libraryButton)
+
         window.contentView = content
         tableView.reloadData()
     }
@@ -292,6 +302,20 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         sources.remove(at: row)
         store.replaceAll(sources)
         tableView.reloadData()
+    }
+
+    @objc private func openLibrary() {
+        let picker = SourceLibraryPickerController(existing: sources) { [weak self] minted in
+            guard let self, !minted.isEmpty else { return }
+            self.sources.append(contentsOf: minted)
+            self.store.replaceAll(self.sources)
+            self.tableView.reloadData()
+            let last = self.sources.count - 1
+            self.tableView.selectRowIndexes(IndexSet(integer: last), byExtendingSelection: false)
+            self.tableView.scrollRowToVisible(last)
+        }
+        libraryPicker = picker
+        picker.present(in: window)
     }
 
     @objc private func moveUp() { move(by: -1) }
