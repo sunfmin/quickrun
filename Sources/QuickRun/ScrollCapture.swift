@@ -60,26 +60,30 @@ final class ScrollCaptureDriver {
         self.scale = scale
     }
 
-    /// Finish capturing — the loop ends after the frame in flight and stitches
-    /// what it has. Triggered by Done or Esc.
+    /// Finish capturing — the loop ends after the frame in flight. Triggered by
+    /// Copy / Save (which finalize) or Esc (which cancels).
     func stop() { stopped = true }
 
-    /// Run the capture loop, calling `completion` on the main queue with the
-    /// stitched image (point size, native-resolution backing) or `nil` if nothing
-    /// usable was captured.
-    func run(completion: @escaping (NSImage?) -> Void) {
+    /// Run the capture loop. `onFrame` fires on the main queue with the current
+    /// stitched image (point size, native-resolution backing) each time a new
+    /// frame is kept, so the Scroll Preview can grow live (ADR 0004). `completion`
+    /// fires on the main queue once the loop ends, with the final stitched image
+    /// or `nil` if nothing usable was captured — the controller uses it to tear
+    /// down and tell apart "finished" from "captured nothing".
+    func run(onFrame: @escaping (NSImage) -> Void, completion: @escaping (NSImage?) -> Void) {
         Task {
-            let image = await capture()
+            let image = await capture(onFrame: onFrame)
             await MainActor.run { completion(image) }
         }
     }
 
-    private func capture() async -> NSImage? {
+    private func capture(onFrame: @escaping (NSImage) -> Void) async -> NSImage? {
         guard let filter = await makeFilter() else { return nil }
         let config = makeConfig()
 
         var frames: [CGImage] = []
         var signatures: [[UInt64]] = []
+        var latest: NSImage?
 
         while !stopped && frames.count < maxFrames {
             if let frame = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) {
@@ -91,13 +95,19 @@ final class ScrollCaptureDriver {
                 if isNew {
                     frames.append(frame)
                     signatures.append(signature)
+                    // Restitch the whole image and emit it so the preview grows.
+                    // O(frames) per kept frame — fine at the grab interval, and the
+                    // preview must rescale every frame anyway (ADR 0004).
+                    if let image = stitch(frames: frames, signatures: signatures) {
+                        latest = image
+                        await MainActor.run { onFrame(image) }
+                    }
                 }
             }
             try? await Task.sleep(nanoseconds: interval)
         }
 
-        guard !frames.isEmpty else { return nil }
-        return stitch(frames: frames, signatures: signatures)
+        return latest
     }
 
     // MARK: - SCK setup

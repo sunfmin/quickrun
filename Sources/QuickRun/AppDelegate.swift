@@ -7,7 +7,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKeyMonitor?
     private var panel: PanelController?
     private var overlay: CaptureOverlayController?
-    private var scrollPreview: ScrollPreviewController?
     private var captureMenuItem: NSMenuItem?
 
     private let store = UserDefaultsSourceStore(defaults: .standard)
@@ -156,18 +155,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let overlay = CaptureOverlayController(frozen: frozen, saveLocation: self.saveLocationStore)
             overlay.onClosed = { [weak self] in self?.overlay = nil }
             overlay.onLookUpWord = { [weak self] word in self?.lookUp(word) }
-            overlay.onScrollCaptured = { [weak self] image in self?.showScrollPreview(image) }
             self.overlay = overlay
             overlay.show()
         }
-    }
-
-    /// Show a finished scroll Capture (ADR 0004) in its own scrollable window.
-    private func showScrollPreview(_ image: NSImage) {
-        let preview = ScrollPreviewController(image: image, saveLocation: saveLocationStore)
-        preview.onClosed = { [weak self] in self?.scrollPreview = nil }
-        scrollPreview = preview
-        preview.show()
     }
 
     /// Look up a Recognized word clicked on the Capture. The Panel dismisses on
