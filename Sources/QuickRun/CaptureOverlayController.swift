@@ -115,6 +115,7 @@ final class CaptureOverlayController: NSObject {
         recognizeWork?.cancel()
         guard let region = view.regionRect else {
             view.words = []
+            viewModel.setRecognizedText("")
             return
         }
         let pixels = CaptureGeometry.pixelRect(forViewRect: region, viewHeight: frozen.frame.height, scale: frozen.scale)
@@ -122,6 +123,9 @@ final class CaptureOverlayController: NSObject {
             guard let self, let cropped = self.frozen.image.cropping(to: pixels) else { return }
             let observations = self.recognizer.recognizeWords(in: cropped)
             let words = RecognizedWordExtractor.clickableWords(from: observations)
+            // Full reading-order text for Copy-text, derived from the same
+            // observations (kept non-de-duplicated, unlike the clickable hits).
+            let text = RecognizedTextExtractor.text(from: observations)
             // Each box is normalized to the region image (bottom-left origin);
             // CaptureGeometry places it back into frozen-screen view points.
             let hits = words.map { word in
@@ -129,7 +133,10 @@ final class CaptureOverlayController: NSObject {
                     text: word.text,
                     rect: CaptureGeometry.viewRect(forNormalizedBox: word.box, in: region))
             }
-            DispatchQueue.main.async { [weak self] in self?.view.words = hits }
+            DispatchQueue.main.async { [weak self] in
+                self?.view.words = hits
+                self?.viewModel.setRecognizedText(text)
+            }
         }
         recognizeWork = work
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.15, execute: work)
@@ -169,6 +176,17 @@ final class CaptureOverlayController: NSObject {
     @objc private func redoTapped() { viewModel.redo(); refresh() }
     @objc private func deleteTapped() { viewModel.deleteSelection(); refresh() }
     @objc private func copyTapped() { copyAndClose() }
+    @objc private func copyTextTapped() {
+        // Plain text, not the image — and a beep when OCR found nothing, rather
+        // than silently clearing the clipboard.
+        guard case .copyText(let text) = viewModel.copyText(), !text.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
     @objc private func saveTapped() { saveAndClose() }
     @objc private func cancelTapped() { close() }
 
@@ -328,13 +346,15 @@ final class CaptureOverlayController: NSObject {
         colorSwatch.action = #selector(showColorPopover)
         colorSwatch.toolTip = "Stroke colour"
 
+        let copyText = makeButton(symbol: "doc.plaintext", tooltip: "Copy recognized text", action: #selector(copyTextTapped))
+
         let copy = makeButton(symbol: "doc.on.clipboard.fill", tooltip: "Copy to clipboard", action: #selector(copyTapped))
         copy.contentTintColor = .systemGreen
         let save = makeButton(symbol: "square.and.arrow.down", tooltip: "Save to folder", action: #selector(saveTapped))
         let cancel = makeButton(symbol: "xmark.circle.fill", tooltip: "Cancel", action: #selector(cancelTapped))
         cancel.contentTintColor = .systemRed
 
-        let row = NSStackView(views: toolViews + [divider(), undo, redo, delete, divider(), colorSwatch,
+        let row = NSStackView(views: toolViews + [copyText, divider(), undo, redo, delete, divider(), colorSwatch,
                                                   divider(), copy, save, cancel])
         row.orientation = .horizontal
         row.spacing = 7

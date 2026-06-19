@@ -17,6 +17,8 @@ public enum MarkupTool: Equatable {
 public enum EditorIntent: Equatable {
     case lookUp(String)
     case copyToClipboard
+    /// Put the Capture's full recognized text (reading order) on the clipboard.
+    case copyText(String)
     case saveToFile
 }
 
@@ -24,6 +26,9 @@ public enum EditorIntent: Equatable {
 /// current object selection, and the Markup document (with its undo/redo).
 public final class EditorViewModel {
     public private(set) var recognizedWords: [String]
+    /// The Capture's full recognized text in reading order, for Copy-text. Kept
+    /// apart from `recognizedWords` (which is de-duplicated for the lookup list).
+    public private(set) var recognizedText: String
     public let document: MarkupDocument
     public private(set) var currentTool: MarkupTool
     public private(set) var selectedObjectID: UUID?
@@ -32,6 +37,7 @@ public final class EditorViewModel {
 
     public init(recognizedWords: [String] = [], document: MarkupDocument = MarkupDocument()) {
         self.recognizedWords = recognizedWords
+        self.recognizedText = ""
         self.document = document
         self.currentTool = .select
         self.selectedObjectID = nil
@@ -44,6 +50,11 @@ public final class EditorViewModel {
     /// Markup document the user may already be editing.
     public func setRecognizedWords(_ words: [String]) {
         recognizedWords = words
+    }
+
+    /// Replace the full reading-order text once OCR finishes (Copy-text source).
+    public func setRecognizedText(_ text: String) {
+        recognizedText = text
     }
 
     /// The Query to look up for the word at `index`, or `nil` if out of range.
@@ -110,6 +121,10 @@ public final class EditorViewModel {
     // MARK: - Export
 
     public func copy() -> EditorIntent { .copyToClipboard }
+
+    /// Copy the full recognized text. The glue beeps when the string is empty
+    /// (nothing was recognized) rather than clearing the clipboard.
+    public func copyText() -> EditorIntent { .copyText(recognizedText) }
 
     public func save() -> EditorIntent { .saveToFile }
 

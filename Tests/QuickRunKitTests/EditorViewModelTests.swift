@@ -41,6 +41,16 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(EditorViewModel().save(), .saveToFile)
     }
 
+    func testCopyTextYieldsTheRecognizedText() {
+        let vm = EditorViewModel()
+        vm.setRecognizedText("Hello world\nsecond line")
+        XCTAssertEqual(vm.copyText(), .copyText("Hello world\nsecond line"))
+    }
+
+    func testCopyTextIsEmptyBeforeRecognition() {
+        XCTAssertEqual(EditorViewModel().copyText(), .copyText(""))
+    }
+
     func testStartsOnSelectTool() {
         XCTAssertEqual(EditorViewModel().currentTool, .select)
     }
