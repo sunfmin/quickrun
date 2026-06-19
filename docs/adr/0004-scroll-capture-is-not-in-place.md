@@ -1,57 +1,76 @@
-# Scroll capture is a non-in-place Capture path
+# Scroll capture: a fixed Main Box over live content, mirrored in a Scroll Preview
 
 Status: accepted — amends ADR 0003 for the scroll-capture case only.
 
 ADR 0003 made every Capture happen *in place*, over one frozen snapshot of the
 screen. Scroll capture is the deliberate exception: the content the user wants is
-taller than the screen, so there is no single frozen frame that holds it. The
-engine instead scrolls the live target, grabs many frames, and stitches them into
-one tall image that, by definition, does not fit where it was captured. That
-image is reviewed and marked up in a **scrollable preview window**, not over the
-frozen overlay.
+taller than the screen, so no single frozen frame holds it. The user draws a
+region, then scrolls the **live** content through that fixed region while QuickRun
+grabs frames and stitches them into one tall Scroll Capture, shown live in a
+**Scroll Preview** pane beside the region. It is copied or saved — not OCR'd or
+marked up.
 
 ## Why it can't reuse the frozen overlay
 
 The in-place model depends on one still: freeze the screen, draw the selector and
 Markup over it, flatten cropped to the region. A taller-than-screen Capture
 breaks both ends — the source can't be a single still (the content must scroll to
-exist), and the output can't be shown in place (it exceeds the display). So
-scroll capture needs its own engine and its own surface.
+exist), and the result can't be shown in place (it exceeds the display). So scroll
+capture needs live content and its own surface.
 
-## How it works
+## The model
 
-- **Frame source.** Repeated ScreenCaptureKit grabs of the chosen region while
-  the **user scrolls the live content themselves** (the overlay prompts "Scroll
-  the page to capture more"). QuickRun does not synthesize scrolls — chosen over
-  injecting `CGEvent` scroll-wheel events because injection is fragile (scroll
-  sign vs the natural-scroll setting, cursor-warp coordinate flips, routing to
-  the wrong window) and a person scrolling their own content is robust and
-  predictable. The driver keeps each frame that adds new rows and drops the
-  unchanged ones; Done or Esc finishes. The grab loop is impure app glue.
-- **Highest pure seam — `ScrollStitcher`** — works on **row signatures** (one
-  hash per pixel row), never raw images, so it is testable with synthetic arrays
-  and no ScreenCaptureKit/Vision:
-  - `verticalOverlap(between:_:)` — how many rows the later frame shares with the
-    earlier one (the earlier frame's matching suffix == the later frame's prefix).
-  - `offsets(forFrames:)` — each frame's top y in the stitched image, overlaps
-    removed; the app composites the real CGImages at those offsets.
-  - end-of-scroll = a frame that adds nothing new (overlap ≈ full frame).
-- **Output.** A tall image larger than the screen, shown in a scrollable preview
-  window. Markup and export reuse the existing `MarkupDocument` / `MarkupRenderer`
-  over that image. OCR on the stitched image reuses the `TextRecognizing` seam.
+1. **Draw, then switch.** The user draws the region in the normal (frozen) Editor,
+   then taps the scroll-capture tool. There is no separate scroll-capture entry —
+   it reuses the Editor's region drawing.
+2. **Unfreeze, keep the Main Box.** The frozen overlay is removed so the real app
+   is live again; the **Main Box** stays drawn at the same screen coordinates as a
+   thin, **click-through outline** (no dimming), so the user's scroll reaches the
+   app beneath it. The box is **locked** — no resize or move — for the run.
+3. **User scrolls; QuickRun grabs and stitches.** Each frame is a ScreenCaptureKit
+   grab of the Main Box; consecutive frames are reduced to **row signatures** and
+   stitched by overlap. The user scrolls — QuickRun does **not** synthesize
+   scrolls. All the stitching maths is the pure `ScrollStitcher` / `RowSignature`
+   in QuickRunKit, testable with synthetic arrays.
+4. **Scroll Preview.** A pane beside the Main Box (right, or left when there's no
+   room) shows the *whole* Scroll Capture live, with **no scrollbar**: it grows to
+   fill the available screen height (downward, and upward if there's room), then
+   scales the whole image down and narrows so the entire stitch stays visible.
+5. **Finish.** **Copy** (to clipboard) and **Save** (to file) each freeze the
+   stitch and act — they double as "done." **Esc** cancels and keeps nothing.
+
+## Decisions and the alternatives rejected
+
+- **Non-in-place** (amends ADR 0003): the stitched image exceeds the screen, so it
+  can't be shown where it was captured. Accepted as the one Capture path not in
+  place.
+- **The user scrolls; no `CGEvent` injection.** Rejected synthesizing scroll-wheel
+  events: injection is fragile (scroll sign vs the natural-scroll setting,
+  cursor-warp coordinate flips, routing to the wrong window). A person scrolling
+  their own content is robust and predictable, and needs no input-synthesis grant.
+- **A live, fit-to-screen Scroll Preview with no scrollbar** — rejected a
+  scrollable post-capture window (an earlier build). Showing the *whole* stitch as
+  it grows gives continuous feedback on how much has been captured; a scrollbar and
+  a separate review window add chrome without adding that feedback. The cost: the
+  preview must rescale every frame as it grows, and very long Captures render tiny.
+- **View-only — copy and save, no OCR or Markup.** A Scroll Capture is for
+  grabbing long content to keep or paste, not to annotate. Marking up or looking
+  up words on a taller-than-screen image would mean a toolbar, Recognized-word
+  hit-testing, and a Markup coordinate space inside a scaled pane — large, and not
+  what the feature is for. If the user wants those, a Single-screen Capture in the
+  Editor still offers them.
 
 ## Consequences
 
-- There are now two Capture surfaces: the in-place frozen overlay (the default,
-  ADR 0003) and the scroll-capture preview window (this ADR). The overlay's
-  toolbar launches the scroll path; the result lands in the preview.
-- The frozen-screen point space of ADR 0003 does not apply to the stitched image,
-  which has its own capture space (its full pixel height). Markup geometry there
-  is in that space; flattening is unchanged.
-- **Known risk** (not solved by the row-signature approach alone): sub-pixel
-  scrolling, sticky headers/footers that repeat across frames, and scrolling
-  faster than the grab interval (which can drop content between frames) can fool
-  overlap detection. The user-driven model mitigates by letting a person scroll
-  at a readable pace; over-sampling (a short grab interval) catches normal speeds.
+- There are two Capture surfaces: the in-place **Editor** for a Single-screen
+  Capture (ADR 0003), and the **Scroll Preview** for a Scroll Capture (this ADR).
+  The Editor's scroll-capture tool launches the second.
+- The frozen-screen point space of ADR 0003 doesn't apply to the stitched image,
+  which has its own capture space (its full pixel height).
 - Screen Recording permission (already required by ADR 0003) covers the grabs. No
-  input is synthesized, so no extra grant is needed beyond ADR 0001/0003.
+  input is synthesized, so no grant beyond ADR 0001/0003 is needed.
+- **Known risk** (not solved by the row-signature approach alone): sub-pixel
+  scrolling, sticky headers/footers that repeat across frames, and scrolling faster
+  than the grab interval (which can drop content between frames) can fool overlap
+  detection. The user-driven pace and a short grab interval mitigate; the risk is
+  tuned against real targets.

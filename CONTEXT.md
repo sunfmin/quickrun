@@ -23,8 +23,24 @@ _Avoid_: popup, popover, window
 ## Capture
 
 **Capture**:
-The region of the frozen screen the user selects on the Editor when the hotkey fires with no Selection. Unlike a Selection it is pixels, not text — text is recovered from it by OCR.
+The pixels the user works with when the hotkey fires with no Selection — at minimum copied or saved; a Single-screen Capture can also be OCR'd and marked up. Unlike a Selection it is pixels, not text. Acquired two ways: a Single-screen Capture or a Scroll Capture.
 _Avoid_: screenshot, image, snapshot
+
+**Single-screen Capture**:
+A Capture of one screenful — the region of the frozen screen the user selects in the Editor, in place where the content sits. Supports the full Editor: Recognized words, Markup, copy, save.
+_Avoid_: region capture
+
+**Scroll Capture**:
+A Capture taller than the screen, stitched from frames grabbed while the user scrolls the live content under the Main Box. Reviewed in the Scroll Preview and copied or saved as-is — no OCR or Markup.
+_Avoid_: long screenshot, scrolling screenshot
+
+**Main Box**:
+The region the user draws that, during a Scroll Capture, stays fixed over the live content while the content scrolls through it — the sampling window each frame is grabbed from. Its width is the Scroll Capture's width; its height is one frame, not the stitched whole.
+_Avoid_: capture region (during scroll capture specifically), viewport
+
+**Scroll Preview**:
+The pane beside the Main Box that shows the whole Scroll Capture at once as it accumulates — never a scrollbar. It grows taller at the Main Box's width as the user scrolls; once it would exceed the screen's height it scales the whole image down and narrows, so the entire stitch stays visible. Carries its only two actions — copy to clipboard, save to file. A distinct surface from the Editor: not in place, view-only.
+_Avoid_: preview window, editor, scroll view
 
 **Recognized word**:
 A word OCR found in the Capture, drawn as live clickable text on it: hovering highlights the word, clicking makes it the Query and looks it up immediately — the screenshot counterpart of a Selection.
