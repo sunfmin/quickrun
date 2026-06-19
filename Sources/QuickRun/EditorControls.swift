@@ -68,100 +68,40 @@ final class SwatchButton: NSButton {
     }
 }
 
-/// The colour popover: an ink palette of the colours people mark up with, laid
-/// out in rows by family — brights, then deeper muted tones, then a neutral
-/// ink→chalk row set off by a hairline. Seal red 朱 leads the grid; the chosen
-/// ink wears the seal-red ring. A curated grid, not the system colour panel,
-/// which can't show above the shield-level capture overlay.
-final class ColorPaletteViewController: NSViewController {
-    private let rows: [[RGBAColor]]
-    private let current: RGBAColor
-    private let onPick: (RGBAColor) -> Void
+/// A stroke-width preset in the inline strip, drawn as a centred filled dot whose
+/// size tracks the width it sets. Wears the accent ring (and accent fill) while
+/// it is the active width, the swatch's counterpart for `StylePresets.widths`.
+final class WidthDotButton: NSButton {
+    let width: Double
+    var isSelectedWidth = false { didSet { needsDisplay = true } }
 
-    /// Six swatches per row at 24pt on 10pt gaps — the rule and rows share it.
-    private static let rowWidth: CGFloat = 6 * 24 + 5 * 10
-
-    init(current: RGBAColor, onPick: @escaping (RGBAColor) -> Void) {
-        self.current = current
-        self.onPick = onPick
-        self.rows = [
-            [ // Brights — the everyday markup inks, seal red first.
-              .sealRed,
-              RGBAColor(red: 0.95, green: 0.45, blue: 0.18),  // orange
-              RGBAColor(red: 0.96, green: 0.65, blue: 0.14),  // amber
-              RGBAColor(red: 0.12, green: 0.67, blue: 0.41),  // jade
-              RGBAColor(red: 0.18, green: 0.43, blue: 0.94),  // ocean
-              RGBAColor(red: 0.49, green: 0.36, blue: 0.85),  // violet
-            ],
-            [ // Deeps — muted earth and jewel tones.
-              RGBAColor(red: 0.62, green: 0.12, blue: 0.18),  // crimson
-              RGBAColor(red: 0.55, green: 0.33, blue: 0.16),  // sienna
-              RGBAColor(red: 0.10, green: 0.45, blue: 0.45),  // teal
-              RGBAColor(red: 0.12, green: 0.22, blue: 0.45),  // navy
-              RGBAColor(red: 0.40, green: 0.16, blue: 0.40),  // plum
-              RGBAColor(red: 0.40, green: 0.45, blue: 0.16),  // olive
-            ],
-            [ // Neutrals — ink to chalk.
-              RGBAColor(red: 0.11, green: 0.11, blue: 0.12),  // ink
-              RGBAColor(red: 0.30, green: 0.31, blue: 0.34),  // graphite
-              RGBAColor(red: 0.48, green: 0.51, blue: 0.55),  // slate
-              RGBAColor(red: 0.65, green: 0.67, blue: 0.70),  // gray
-              RGBAColor(red: 0.82, green: 0.84, blue: 0.86),  // silver
-              RGBAColor(red: 1, green: 1, blue: 1),           // chalk
-            ],
-        ]
-        super.init(nibName: nil, bundle: nil)
+    init(width: Double, target: AnyObject?, action: Selector?) {
+        self.width = width
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+        isBordered = false
+        title = ""
+        toolTip = "\(Int(width)) pt"
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 26).isActive = true
+        heightAnchor.constraint(equalToConstant: 26).isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func loadView() {
-        let bright = makeRow(rows[0])
-        let deep = makeRow(rows[1])
-        let neutral = makeRow(rows[2])
-
-        let rule = NSBox()
-        rule.boxType = .separator
-        rule.translatesAutoresizingMaskIntoConstraints = false
-        rule.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
-
-        let stack = NSStackView(views: [bright, deep, rule, neutral])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        let container = NSVisualEffectView()
-        container.material = .menu
-        container.blendingMode = .behindWindow
-        container.state = .active
-        container.wantsLayer = true
-        container.layer?.cornerRadius = 10
-        container.layer?.masksToBounds = true
-        container.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-        ])
-        view = container
-    }
-
-    private func makeRow(_ colors: [RGBAColor]) -> NSStackView {
-        let swatches = colors.map { color -> SwatchButton in
-            let swatch = SwatchButton(color: color, diameter: 24, target: self, action: #selector(pick(_:)))
-            swatch.isSelectedSwatch = color == current
-            return swatch
+    override func draw(_ dirtyRect: NSRect) {
+        let diameter = min(bounds.width - 6, CGFloat(width) + 5)
+        let dot = NSBezierPath(ovalIn: CGRect(x: bounds.midX - diameter / 2,
+                                              y: bounds.midY - diameter / 2,
+                                              width: diameter, height: diameter))
+        (isSelectedWidth ? Palette.accent : NSColor.secondaryLabelColor).setFill()
+        dot.fill()
+        if isSelectedWidth {
+            let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1))
+            Palette.accent.setStroke()
+            ring.lineWidth = 2
+            ring.stroke()
         }
-        let row = NSStackView(views: swatches)
-        row.orientation = .horizontal
-        row.spacing = 10
-        return row
-    }
-
-    @objc private func pick(_ sender: SwatchButton) {
-        onPick(sender.color)
     }
 }

@@ -29,13 +29,11 @@ final class CaptureOverlayController: NSObject {
     // Floating toolbar, shown once a region is committed.
     private var toolbar: NSPanel?
     private var toolButtons: [MarkupTool: ToolButton] = [:]
-    private let colorSwatch = SwatchButton(color: .sealRed, diameter: 22, target: nil, action: nil)
-    // The colour palette as a borderless child of the overlay. An NSPopover sits
-    // below the shield-level overlay and never receives the click; a child panel
-    // (like the toolbar) does.
-    private var colorPanel: NSPanel?
-    private var colorPaletteVC: ColorPaletteViewController?
-    private var colorDismissMonitor: Any?
+    // The persistent ink + width strip beneath the tool row — always visible, no
+    // popover. Each button restyles the selection (or sets the default) via the
+    // view model; `refresh()` rings whichever matches the current style.
+    private var swatchButtons: [SwatchButton] = []
+    private var widthButtons: [WidthDotButton] = []
     private static let toolbarHeight: CGFloat = 44
     private static let toolbarGap: CGFloat = 12
 
@@ -161,7 +159,10 @@ final class CaptureOverlayController: NSObject {
         view.tool = viewModel.currentTool
         view.activeStyle = viewModel.defaultStyle
         for (tool, button) in toolButtons { button.isActive = tool == viewModel.currentTool }
-        colorSwatch.color = viewModel.defaultStyle.stroke
+        // Ring the swatch and width dot that match the active style.
+        let style = viewModel.defaultStyle
+        for swatch in swatchButtons { swatch.isSelectedSwatch = swatch.color == style.stroke }
+        for dot in widthButtons { dot.isSelectedWidth = dot.width == style.lineWidth }
     }
 
     // MARK: - Toolbar actions
@@ -190,63 +191,19 @@ final class CaptureOverlayController: NSObject {
     @objc private func saveTapped() { saveAndClose() }
     @objc private func cancelTapped() { close() }
 
-    @objc private func showColorPopover() {
-        if colorPanel != nil { hideColorPanel(); return }
-
+    /// Pick a stroke colour from the strip: restyle the selection if there is one,
+    /// otherwise set the ink for the next mark — keeping the current width/size.
+    @objc private func swatchTapped(_ sender: SwatchButton) {
         let style = viewModel.defaultStyle
-        let palette = ColorPaletteViewController(current: style.stroke) { [weak self] color in
-            guard let self else { return }
-            self.viewModel.setStyle(MarkupStyle(stroke: color, lineWidth: style.lineWidth, fontSize: style.fontSize))
-            self.refresh()
-            self.hideColorPanel()
-        }
-        let content = palette.view
-        content.layoutSubtreeIfNeeded()
-        let size = content.fittingSize
-
-        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
-                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.isFloatingPanel = true
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.hidesOnDeactivate = false
-        panel.isReleasedWhenClosed = false
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        panel.contentView = content
-
-        window.addChildWindow(panel, ordered: .above)
-        colorPanel = panel
-        colorPaletteVC = palette
-        positionColorPanel(size: size)
-
-        // Dismiss on a click anywhere outside the palette.
-        colorDismissMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self, let panel = self.colorPanel else { return event }
-            if event.window !== panel { self.hideColorPanel() }
-            return event
-        }
+        viewModel.setStyle(MarkupStyle(stroke: sender.color, lineWidth: style.lineWidth, fontSize: style.fontSize))
+        refresh()
     }
 
-    /// Place the palette next to the toolbar's colour swatch — below it, or
-    /// above when there's no room — clamped to the display.
-    private func positionColorPanel(size: NSSize) {
-        guard let colorPanel, let swatchWindow = colorSwatch.window else { return }
-        let swatch = swatchWindow.convertToScreen(colorSwatch.convert(colorSwatch.bounds, to: nil))
-        let display = frozen.frame
-        var x = swatch.midX - size.width / 2
-        x = min(max(x, display.minX + 8), display.maxX - size.width - 8)
-        var y = swatch.minY - 8 - size.height
-        if y < display.minY + 8 { y = swatch.maxY + 8 }
-        y = min(y, display.maxY - size.height - 8)
-        colorPanel.setFrameOrigin(NSPoint(x: x, y: y))
-    }
-
-    private func hideColorPanel() {
-        if let monitor = colorDismissMonitor { NSEvent.removeMonitor(monitor); colorDismissMonitor = nil }
-        if let colorPanel { window.removeChildWindow(colorPanel); colorPanel.orderOut(nil) }
-        colorPanel = nil
-        colorPaletteVC = nil
+    /// Pick a stroke width from the strip, keeping the current ink/size.
+    @objc private func widthTapped(_ sender: WidthDotButton) {
+        let style = viewModel.defaultStyle
+        viewModel.setStyle(MarkupStyle(stroke: style.stroke, lineWidth: sender.width, fontSize: style.fontSize))
+        refresh()
     }
 
     // MARK: - Terminal actions
@@ -284,7 +241,6 @@ final class CaptureOverlayController: NSObject {
     }
 
     private func close() {
-        hideColorPanel()
         // Un-parent every child (toolbar, and any looked-up Panel) so they
         // aren't tied to the overlay once it goes away.
         window.childWindows?.forEach { window.removeChildWindow($0) }
@@ -342,10 +298,6 @@ final class CaptureOverlayController: NSObject {
         let redo = makeButton(symbol: "arrow.uturn.forward", tooltip: "Redo", action: #selector(redoTapped))
         let delete = makeButton(symbol: "trash", tooltip: "Delete", action: #selector(deleteTapped))
 
-        colorSwatch.target = self
-        colorSwatch.action = #selector(showColorPopover)
-        colorSwatch.toolTip = "Stroke colour"
-
         let copyText = makeButton(symbol: "doc.plaintext", tooltip: "Copy recognized text", action: #selector(copyTextTapped))
 
         let copy = makeButton(symbol: "doc.on.clipboard.fill", tooltip: "Copy to clipboard", action: #selector(copyTapped))
@@ -354,24 +306,45 @@ final class CaptureOverlayController: NSObject {
         let cancel = makeButton(symbol: "xmark.circle.fill", tooltip: "Cancel", action: #selector(cancelTapped))
         cancel.contentTintColor = .systemRed
 
-        let row = NSStackView(views: toolViews + [copyText, divider(), undo, redo, delete, divider(), colorSwatch,
+        let row = NSStackView(views: toolViews + [copyText, divider(), undo, redo, delete,
                                                   divider(), copy, save, cancel])
         row.orientation = .horizontal
         row.spacing = 7
-        row.translatesAutoresizingMaskIntoConstraints = false
 
-        bar.addSubview(row)
+        let column = NSStackView(views: [row, buildStyleStrip()])
+        column.orientation = .vertical
+        column.alignment = .centerX
+        column.spacing = 6
+        column.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        column.translatesAutoresizingMaskIntoConstraints = false
+
+        bar.addSubview(column)
         panel.contentView = bar
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 12),
-            row.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -12),
-            row.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            row.heightAnchor.constraint(equalToConstant: Self.toolbarHeight),
+            column.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            column.topAnchor.constraint(equalTo: bar.topAnchor),
+            column.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
         ])
-        panel.setContentSize(row.fittingSize + NSSize(width: 24, height: 0))
+        panel.setContentSize(column.fittingSize)
 
         window.addChildWindow(panel, ordered: .above)
         toolbar = panel
+    }
+
+    /// The persistent ink + width strip: width-preset dots, then a hairline, then
+    /// the colour swatches — all from `StylePresets`, the single source of truth.
+    private func buildStyleStrip() -> NSView {
+        widthButtons = StylePresets.widths.map { width in
+            WidthDotButton(width: width, target: self, action: #selector(widthTapped(_:)))
+        }
+        swatchButtons = StylePresets.colors.map { color in
+            SwatchButton(color: color, diameter: 22, target: self, action: #selector(swatchTapped(_:)))
+        }
+        let strip = NSStackView(views: widthButtons + [divider()] + swatchButtons)
+        strip.orientation = .horizontal
+        strip.spacing = 8
+        return strip
     }
 
     /// Place the toolbar just below the region (above it when there is no room),
@@ -416,10 +389,6 @@ final class CaptureOverlayController: NSObject {
         line.heightAnchor.constraint(equalToConstant: 20).isActive = true
         return line
     }
-}
-
-private func + (lhs: NSSize, rhs: NSSize) -> NSSize {
-    NSSize(width: lhs.width + rhs.width, height: lhs.height + rhs.height)
 }
 
 /// A borderless window must opt in to becoming key, or it can never take the
