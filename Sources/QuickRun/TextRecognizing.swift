@@ -15,7 +15,11 @@ final class VisionTextRecognizer: TextRecognizing {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
-        request.recognitionLanguages = ["en-US", "zh-Hans", "zh-Hant"]
+        // Order matters: Vision biases recognition toward the first language, and
+        // with "en-US" first it returns *nothing* for any image containing Chinese
+        // (verified on revision 3 / macOS 26). Chinese first recognizes both CJK
+        // and English with no English regression — so it leads.
+        request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
 
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         do {
