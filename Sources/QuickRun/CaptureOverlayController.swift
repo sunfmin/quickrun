@@ -25,6 +25,14 @@ final class CaptureOverlayController: NSObject {
     /// Forward a clicked Recognized word to the app, which looks it up in the
     /// Panel. Set by the AppDelegate.
     var onLookUpWord: ((String) -> Void)?
+    /// A stitched scroll Capture (ADR 0004) finished — the app shows it in the
+    /// scrollable preview window. Set by the AppDelegate.
+    var onScrollCaptured: ((NSImage) -> Void)?
+
+    // Scroll-capture run state (the driver, its Stop HUD, and the Esc monitors).
+    private var scrollDriver: ScrollCaptureDriver?
+    private var scrollHUD: NSPanel?
+    private var scrollStopMonitors: [Any] = []
 
     // Floating toolbar, shown once a region is committed.
     private var toolbar: NSPanel?
@@ -274,7 +282,103 @@ final class CaptureOverlayController: NSObject {
         }
     }
 
+    // MARK: - Scroll capture (ADR 0004 — non-in-place)
+
+    @objc private func scrollCaptureTapped() { startScrollCapture() }
+
+    /// Hide the frozen overlay so the live content shows, then scroll-capture the
+    /// region and hand the stitched image to the app for its preview window.
+    private func startScrollCapture() {
+        guard let regionView = view.regionRect, let displayID = frozen.screen.displayID else {
+            NSSound.beep()
+            return
+        }
+        let regionScreen = window.convertToScreen(regionView)
+
+        // Drop the shield overlay and toolbar so the real, scrollable content is
+        // visible and reachable by the synthesized scrolls.
+        toolbar?.orderOut(nil)
+        window.orderOut(nil)
+        showScrollHUD()
+        installScrollStopMonitors()
+
+        let driver = ScrollCaptureDriver(region: regionScreen, screen: frozen.screen,
+                                         displayID: displayID, scale: frozen.scale)
+        scrollDriver = driver
+        driver.run { [weak self] image in
+            guard let self else { return }
+            self.endScrollCapture()
+            if let image {
+                self.onScrollCaptured?(image)
+                self.close()
+            } else {
+                NSSound.beep()
+                self.window.makeKeyAndOrderFront(nil) // capture failed — bring the overlay back
+                self.toolbar?.orderFront(nil)
+            }
+        }
+    }
+
+    private func endScrollCapture() {
+        scrollDriver = nil
+        scrollStopMonitors.forEach(NSEvent.removeMonitor)
+        scrollStopMonitors = []
+        scrollHUD?.orderOut(nil)
+        scrollHUD = nil
+    }
+
+    /// A small floating label while scroll capture runs, with the stop hint.
+    private func showScrollHUD() {
+        let label = NSTextField(labelWithString: "Scrolling… press Esc to stop")
+        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let bar = NSVisualEffectView()
+        bar.material = .hudWindow
+        bar.blendingMode = .behindWindow
+        bar.state = .active
+        bar.wantsLayer = true
+        bar.layer?.cornerRadius = 10
+        bar.layer?.masksToBounds = true
+        bar.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 18),
+            label.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -18),
+            label.topAnchor.constraint(equalTo: bar.topAnchor, constant: 12),
+            label.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -12),
+        ])
+
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 280, height: 44),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .statusBar
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.contentView = bar
+        panel.setContentSize(bar.fittingSize)
+        let display = frozen.frame
+        panel.setFrameOrigin(NSPoint(x: display.midX - panel.frame.width / 2,
+                                     y: display.minY + 60))
+        panel.orderFrontRegardless()
+        scrollHUD = panel
+    }
+
+    /// Esc (or any click) stops the run early; the driver stitches what it has.
+    private func installScrollStopMonitors() {
+        let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            if event.keyCode == 53 { self?.scrollDriver?.stop() } // Esc
+            return event
+        }
+        let global = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            if event.keyCode == 53 { self?.scrollDriver?.stop() }
+        }
+        scrollStopMonitors = [local, global].compactMap { $0 }
+    }
+
     private func close() {
+        endScrollCapture()
         // Un-parent every child (toolbar, and any looked-up Panel) so they
         // aren't tied to the overlay once it goes away.
         window.childWindows?.forEach { window.removeChildWindow($0) }
@@ -336,6 +440,7 @@ final class CaptureOverlayController: NSObject {
         let redo = makeButton(symbol: "arrow.uturn.forward", tooltip: "Redo", action: #selector(redoTapped))
         let delete = makeButton(symbol: "trash", tooltip: "Delete", action: #selector(deleteTapped))
 
+        let scrollCapture = makeButton(symbol: "arrow.up.and.down", tooltip: "Scroll capture", action: #selector(scrollCaptureTapped))
         let copyText = makeButton(symbol: "doc.plaintext", tooltip: "Copy recognized text", action: #selector(copyTextTapped))
 
         let copy = makeButton(symbol: "doc.on.clipboard.fill", tooltip: "Copy to clipboard", action: #selector(copyTapped))
@@ -344,7 +449,7 @@ final class CaptureOverlayController: NSObject {
         let cancel = makeButton(symbol: "xmark.circle.fill", tooltip: "Cancel", action: #selector(cancelTapped))
         cancel.contentTintColor = .systemRed
 
-        let row = NSStackView(views: toolViews + [copyText, divider(), undo, redo, delete,
+        let row = NSStackView(views: toolViews + [scrollCapture, copyText, divider(), undo, redo, delete,
                                                   divider(), copy, save, cancel])
         row.orientation = .horizontal
         row.spacing = 7
