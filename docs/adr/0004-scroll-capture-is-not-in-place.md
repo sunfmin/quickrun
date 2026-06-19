@@ -20,9 +20,14 @@ scroll capture needs its own engine and its own surface.
 
 ## How it works
 
-- **Frame source.** A ScreenCaptureKit stream of the chosen region while QuickRun
-  sends scroll-wheel events (`CGEvent`) to the target. The driver — stream
-  lifecycle plus scroll injection — is impure app glue.
+- **Frame source.** Repeated ScreenCaptureKit grabs of the chosen region while
+  the **user scrolls the live content themselves** (the overlay prompts "Scroll
+  the page to capture more"). QuickRun does not synthesize scrolls — chosen over
+  injecting `CGEvent` scroll-wheel events because injection is fragile (scroll
+  sign vs the natural-scroll setting, cursor-warp coordinate flips, routing to
+  the wrong window) and a person scrolling their own content is robust and
+  predictable. The driver keeps each frame that adds new rows and drops the
+  unchanged ones; Done or Esc finishes. The grab loop is impure app glue.
 - **Highest pure seam — `ScrollStitcher`** — works on **row signatures** (one
   hash per pixel row), never raw images, so it is testable with synthetic arrays
   and no ScreenCaptureKit/Vision:
@@ -44,9 +49,9 @@ scroll capture needs its own engine and its own surface.
   which has its own capture space (its full pixel height). Markup geometry there
   is in that space; flattening is unchanged.
 - **Known risk** (not solved by the row-signature approach alone): sub-pixel
-  scrolling, sticky headers/footers that repeat across frames, and variable scroll
-  speed can fool overlap detection. Mitigations live in the driver — scroll by a
-  fixed fraction and over-sample frames — and are tuned against real targets.
-- Screen Recording permission (already required by ADR 0003) covers the stream;
-  scroll injection needs the Accessibility grant QuickRun already holds (ADR 0001)
-  for synthesizing input.
+  scrolling, sticky headers/footers that repeat across frames, and scrolling
+  faster than the grab interval (which can drop content between frames) can fool
+  overlap detection. The user-driven model mitigates by letting a person scroll
+  at a readable pace; over-sampling (a short grab interval) catches normal speeds.
+- Screen Recording permission (already required by ADR 0003) covers the grabs. No
+  input is synthesized, so no extra grant is needed beyond ADR 0001/0003.

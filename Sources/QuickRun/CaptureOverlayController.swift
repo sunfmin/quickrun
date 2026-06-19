@@ -29,10 +29,13 @@ final class CaptureOverlayController: NSObject {
     /// scrollable preview window. Set by the AppDelegate.
     var onScrollCaptured: ((NSImage) -> Void)?
 
-    // Scroll-capture run state (the driver, its Stop HUD, and the Esc monitors).
+    // Scroll-capture run state: the driver, the click-through region guide, the
+    // Done/Cancel controls, the Esc monitor, and whether the user cancelled.
     private var scrollDriver: ScrollCaptureDriver?
-    private var scrollHUD: NSPanel?
+    private var scrollGuide: NSPanel?
+    private var scrollControls: NSPanel?
     private var scrollStopMonitors: [Any] = []
+    private var scrollCancelled = false
 
     // Floating toolbar, shown once a region is committed.
     private var toolbar: NSPanel?
@@ -282,24 +285,30 @@ final class CaptureOverlayController: NSObject {
         }
     }
 
-    // MARK: - Scroll capture (ADR 0004 — non-in-place)
+    // MARK: - Scroll capture (ADR 0004 — non-in-place, user-driven scroll)
 
     @objc private func scrollCaptureTapped() { startScrollCapture() }
+    @objc private func scrollDoneTapped() { scrollDriver?.stop() }
+    @objc private func scrollCancelTapped() {
+        scrollCancelled = true
+        scrollDriver?.stop()
+    }
 
-    /// Hide the frozen overlay so the live content shows, then scroll-capture the
-    /// region and hand the stitched image to the app for its preview window.
+    /// Hide the frozen overlay so the real, scrollable content shows, prompt the
+    /// user to scroll the page, and grab + stitch frames as they do. Done or Esc
+    /// finishes (→ preview); Cancel aborts and brings the overlay back.
     private func startScrollCapture() {
         guard let regionView = view.regionRect, let displayID = frozen.screen.displayID else {
             NSSound.beep()
             return
         }
         let regionScreen = window.convertToScreen(regionView)
+        scrollCancelled = false
 
-        // Drop the shield overlay and toolbar so the real, scrollable content is
-        // visible and reachable by the synthesized scrolls.
         toolbar?.orderOut(nil)
         window.orderOut(nil)
-        showScrollHUD()
+        showScrollGuide(over: regionScreen)
+        showScrollControls(below: regionScreen)
         installScrollStopMonitors()
 
         let driver = ScrollCaptureDriver(region: regionScreen, screen: frozen.screen,
@@ -307,13 +316,14 @@ final class CaptureOverlayController: NSObject {
         scrollDriver = driver
         driver.run { [weak self] image in
             guard let self else { return }
+            let cancelled = self.scrollCancelled
             self.endScrollCapture()
-            if let image {
+            if !cancelled, let image {
                 self.onScrollCaptured?(image)
                 self.close()
             } else {
-                NSSound.beep()
-                self.window.makeKeyAndOrderFront(nil) // capture failed — bring the overlay back
+                if !cancelled { NSSound.beep() } // nothing captured
+                self.window.makeKeyAndOrderFront(nil) // bring the overlay back
                 self.toolbar?.orderFront(nil)
             }
         }
@@ -323,49 +333,77 @@ final class CaptureOverlayController: NSObject {
         scrollDriver = nil
         scrollStopMonitors.forEach(NSEvent.removeMonitor)
         scrollStopMonitors = []
-        scrollHUD?.orderOut(nil)
-        scrollHUD = nil
+        scrollGuide?.orderOut(nil); scrollGuide = nil
+        scrollControls?.orderOut(nil); scrollControls = nil
     }
 
-    /// A small floating label while scroll capture runs, with the stop hint.
-    private func showScrollHUD() {
-        let label = NSTextField(labelWithString: "Scrolling… press Esc to stop")
-        label.font = .systemFont(ofSize: 14, weight: .medium)
-        label.textColor = .white
-        label.translatesAutoresizingMaskIntoConstraints = false
-
-        let bar = NSVisualEffectView()
-        bar.material = .hudWindow
-        bar.blendingMode = .behindWindow
-        bar.state = .active
-        bar.wantsLayer = true
-        bar.layer?.cornerRadius = 10
-        bar.layer?.masksToBounds = true
-        bar.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 18),
-            label.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -18),
-            label.topAnchor.constraint(equalTo: bar.topAnchor, constant: 12),
-            label.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -12),
-        ])
-
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 280, height: 44),
+    /// A click-through outline over the region with the "Scroll the page" prompt;
+    /// it ignores the mouse so scrolls pass through to the content beneath.
+    private func showScrollGuide(over regionScreen: CGRect) {
+        let panel = NSPanel(contentRect: regionScreen,
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
         panel.level = .statusBar
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = true
-        panel.contentView = bar
-        panel.setContentSize(bar.fittingSize)
-        let display = frozen.frame
-        panel.setFrameOrigin(NSPoint(x: display.midX - panel.frame.width / 2,
-                                     y: display.minY + 60))
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        let guide = ScrollGuideView(frame: NSRect(origin: .zero, size: regionScreen.size))
+        guide.autoresizingMask = [.width, .height]
+        panel.contentView = guide
         panel.orderFrontRegardless()
-        scrollHUD = panel
+        scrollGuide = panel
     }
 
-    /// Esc (or any click) stops the run early; the driver stitches what it has.
+    /// Done / Cancel, placed below the region (above when there's no room).
+    private func showScrollControls(below regionScreen: CGRect) {
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(scrollCancelTapped))
+        let done = NSButton(title: "Done", target: self, action: #selector(scrollDoneTapped))
+        done.keyEquivalent = "\r"
+        let row = NSStackView(views: [cancel, done])
+        row.spacing = 8
+        row.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+
+        let bar = NSVisualEffectView()
+        bar.material = .menu
+        bar.blendingMode = .behindWindow
+        bar.state = .active
+        bar.wantsLayer = true
+        bar.layer?.cornerRadius = 10
+        bar.layer?.masksToBounds = true
+        bar.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            row.topAnchor.constraint(equalTo: bar.topAnchor),
+            row.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+        ])
+
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: row.fittingSize),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.level = .statusBar
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.contentView = bar
+        panel.setContentSize(row.fittingSize)
+
+        let size = panel.frame.size
+        let display = frozen.frame
+        var x = regionScreen.midX - size.width / 2
+        x = min(max(x, display.minX + 8), display.maxX - size.width - 8)
+        var y = regionScreen.minY - Self.toolbarGap - size.height
+        if y < display.minY + 8 { y = regionScreen.maxY + Self.toolbarGap }
+        y = min(y, display.maxY - size.height - 8)
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        panel.orderFrontRegardless()
+        scrollControls = panel
+    }
+
+    /// Esc finishes the run (like Done); the driver stitches what it has.
     private func installScrollStopMonitors() {
         let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             if event.keyCode == 53 { self?.scrollDriver?.stop() } // Esc

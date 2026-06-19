@@ -2,15 +2,42 @@ import AppKit
 import ScreenCaptureKit
 import QuickRunKit
 
-/// Drives scroll capture (ADR 0004): re-captures a region with ScreenCaptureKit
-/// while sending scroll-wheel events to the content under it, detects when each
-/// new frame stops adding rows (or the user stops), and stitches the frames into
-/// one tall image. The frozen-overlay capture path is untouched; this is the
-/// separate, non-in-place engine.
+/// The non-interactive overlay drawn over the scroll-capture region while it
+/// runs: a bright border and the "Scroll the page to capture more" prompt. Its
+/// panel is click-through, so this view never handles events itself.
+final class ScrollGuideView: NSView {
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let border = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
+        Palette.accent.setStroke()
+        border.lineWidth = 2
+        border.stroke()
+
+        let text = "Scroll the page to capture more"
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        let textSize = (text as NSString).size(withAttributes: attributes)
+        let pill = CGRect(x: bounds.midX - textSize.width / 2 - 12, y: 10,
+                          width: textSize.width + 24, height: textSize.height + 12)
+        NSColor.black.withAlphaComponent(0.6).setFill()
+        NSBezierPath(roundedRect: pill, xRadius: 8, yRadius: 8).fill()
+        (text as NSString).draw(at: CGPoint(x: pill.minX + 12, y: pill.minY + 6), withAttributes: attributes)
+    }
+}
+
+/// Drives scroll capture (ADR 0004): while the user scrolls the live content
+/// under the chosen region, this re-captures the region with ScreenCaptureKit,
+/// keeps each frame that adds new rows, and stitches them into one tall image.
+/// The user scrolls — QuickRun does not synthesize scrolls — which sidesteps
+/// scroll-injection fragility and matches the "Scroll the page to capture more"
+/// prompt the overlay shows.
 ///
 /// All the stitching maths is the pure `ScrollStitcher`/`RowSignature` in
-/// QuickRunKit; this type is the impure glue — the SCK stream and the synthesized
-/// scrolls — that can only be exercised against live content.
+/// QuickRunKit; this type is the impure glue (the SCK grabs and the frame loop)
+/// that can only be exercised against live content.
 final class ScrollCaptureDriver {
     /// `region` is in global screen points (AppKit, bottom-left origin).
     private let region: CGRect
@@ -18,11 +45,11 @@ final class ScrollCaptureDriver {
     private let displayID: CGDirectDisplayID
     private let scale: CGFloat
 
-    /// Stop after this many frames even if the end isn't detected, so a region
-    /// over endlessly-loading content can't capture forever.
-    private let maxFrames = 40
-    /// Pause after each scroll so the content settles before the next grab.
-    private let settle: UInt64 = 280_000_000 // 280 ms in nanoseconds
+    /// Grab interval — fast enough to catch a normal scroll, with enough overlap
+    /// between frames to stitch robustly.
+    private let interval: UInt64 = 120_000_000 // 120 ms in nanoseconds
+    /// A safety bound on frames so a very long scroll can't grow without limit.
+    private let maxFrames = 400
 
     private var stopped = false
 
@@ -33,8 +60,8 @@ final class ScrollCaptureDriver {
         self.scale = scale
     }
 
-    /// Stop early (the user pressed Esc / clicked Stop). The loop ends after the
-    /// frame in flight and stitches what it has.
+    /// Finish capturing — the loop ends after the frame in flight and stitches
+    /// what it has. Triggered by Done or Esc.
     func stop() { stopped = true }
 
     /// Run the capture loop, calling `completion` on the main queue with the
@@ -51,24 +78,22 @@ final class ScrollCaptureDriver {
         guard let filter = await makeFilter() else { return nil }
         let config = makeConfig()
 
-        warpCursorToRegionCenter()
-
         var frames: [CGImage] = []
         var signatures: [[UInt64]] = []
 
-        while frames.count < maxFrames && !stopped {
-            guard let frame = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) else {
-                break
+        while !stopped && frames.count < maxFrames {
+            if let frame = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) {
+                let signature = RowSignature.rows(of: frame)
+                // Keep a frame only when it differs from the last kept one — i.e.
+                // the user scrolled and new rows appeared. A still page captures
+                // one frame and waits.
+                let isNew = signatures.last.map { !ScrollStitcher.reachedEnd($0, signature) } ?? true
+                if isNew {
+                    frames.append(frame)
+                    signatures.append(signature)
+                }
             }
-            let signature = RowSignature.rows(of: frame)
-            if let previous = signatures.last, ScrollStitcher.reachedEnd(previous, signature) {
-                break // a frame that added nothing — end of the content
-            }
-            frames.append(frame)
-            signatures.append(signature)
-
-            postScrollDown()
-            try? await Task.sleep(nanoseconds: settle)
+            try? await Task.sleep(nanoseconds: interval)
         }
 
         guard !frames.isEmpty else { return nil }
@@ -95,27 +120,6 @@ final class ScrollCaptureDriver {
         config.height = Int((region.height * scale).rounded())
         config.showsCursor = false
         return config
-    }
-
-    // MARK: - Scroll injection
-
-    /// Scroll the content under the region down by about half the region's height,
-    /// so consecutive frames overlap heavily (robust against sub-pixel drift).
-    private func postScrollDown() {
-        let delta = Int32(-(region.height * 0.5)) // negative wheel1 advances content
-        let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
-                            wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)
-        event?.post(tap: .cghidEventTap)
-    }
-
-    /// Move the cursor into the region so the scroll events land on the content
-    /// there. Global coordinates here are top-left origin (Core Graphics), flipped
-    /// from AppKit around the main display's height.
-    private func warpCursorToRegionCenter() {
-        let mainHeight = NSScreen.screens.first { $0.frame.origin == .zero }?.frame.height
-            ?? screen.frame.height
-        let center = CGPoint(x: region.midX, y: mainHeight - region.midY)
-        CGWarpMouseCursorPosition(center)
     }
 
     // MARK: - Stitch
