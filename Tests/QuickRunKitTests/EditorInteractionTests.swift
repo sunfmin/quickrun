@@ -77,7 +77,7 @@ final class EditorInteractionTests: XCTestCase {
     }
 
     func testEveryDrawingToolResolvesToDraw() {
-        for tool in [MarkupTool.rectangle, .arrow, .freehand, .highlight, .blur] {
+        for tool in [MarkupTool.rectangle, .ellipse, .arrow, .freehand, .highlight, .blur] {
             XCTAssertEqual(resolve(tool: tool, at: CGPoint(x: 400, y: 350)), .drawMarkup, "\(tool)")
         }
     }

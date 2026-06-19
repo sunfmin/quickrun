@@ -44,6 +44,9 @@ public struct MarkupObject: Equatable, Identifiable {
 
     public enum Kind: Equatable {
         case rectangle(CGRect)
+        /// An ellipse inscribed in its bounding rect — circles a region the way
+        /// `rectangle` boxes one. Mirrors rectangle in every model respect.
+        case ellipse(CGRect)
         case arrow(from: CGPoint, to: CGPoint)
         /// A text label and its frame in capture space (the glue measures the frame).
         case text(String, CGRect)
@@ -67,6 +70,8 @@ public struct MarkupObject: Equatable, Identifiable {
         switch kind {
         case .rectangle(let rect):
             copy.kind = .rectangle(rect.offsetBy(dx: dx, dy: dy))
+        case .ellipse(let rect):
+            copy.kind = .ellipse(rect.offsetBy(dx: dx, dy: dy))
         case .arrow(let from, let to):
             copy.kind = .arrow(from: CGPoint(x: from.x + dx, y: from.y + dy),
                                to: CGPoint(x: to.x + dx, y: to.y + dy))
@@ -88,7 +93,7 @@ public struct MarkupObject: Equatable, Identifiable {
     public var bounds: CGRect {
         let pad = CGFloat(style.lineWidth) / 2
         switch kind {
-        case .rectangle(let rect):
+        case .rectangle(let rect), .ellipse(let rect):
             return rect.standardized.insetBy(dx: -pad, dy: -pad)
         case .arrow(let from, let to):
             return Self.boundingBox([from, to]).insetBy(dx: -pad, dy: -pad)

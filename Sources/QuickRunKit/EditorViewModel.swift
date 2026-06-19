@@ -5,6 +5,7 @@ import Foundation
 public enum MarkupTool: Equatable {
     case select
     case rectangle
+    case ellipse
     case arrow
     case text
     case freehand

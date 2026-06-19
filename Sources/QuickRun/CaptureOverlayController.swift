@@ -304,6 +304,7 @@ final class CaptureOverlayController: NSObject {
         let tools: [(MarkupTool, String, String)] = [
             (.select, "cursorarrow", "Select"),
             (.rectangle, "rectangle", "Rectangle"),
+            (.ellipse, "circle", "Ellipse"),
             (.arrow, "arrow.up.right", "Arrow"),
             (.text, "textformat", "Text"),
             (.freehand, "pencil.tip", "Pen"),
@@ -738,7 +739,7 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         case .freehand, .highlight:
             strokePoints.append(point)
             updatePending(to: point)
-        case .rectangle, .arrow, .blur:
+        case .rectangle, .ellipse, .arrow, .blur:
             updatePending(to: point)
         default:
             break
@@ -749,7 +750,7 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         switch tool {
         case .select:
             if let id = movingID, moveOffset != .zero { onMoveMark?(id, moveOffset) }
-        case .rectangle, .arrow, .freehand, .highlight, .blur:
+        case .rectangle, .ellipse, .arrow, .freehand, .highlight, .blur:
             if let kind = pendingKind, Self.isCommittable(kind) { onCommitMark?(kind) }
         case .text:
             break
@@ -765,6 +766,7 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         guard let start = markDragStart else { return }
         switch tool {
         case .rectangle: pendingKind = .rectangle(spanRect(start, point))
+        case .ellipse: pendingKind = .ellipse(spanRect(start, point))
         case .blur: pendingKind = .blur(spanRect(start, point))
         case .arrow: pendingKind = .arrow(from: start, to: point)
         case .freehand: pendingKind = .freehand(strokePoints)
@@ -779,7 +781,7 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
 
     private static func isCommittable(_ kind: MarkupObject.Kind) -> Bool {
         switch kind {
-        case .rectangle(let rect), .blur(let rect):
+        case .rectangle(let rect), .ellipse(let rect), .blur(let rect):
             return rect.width > 2 && rect.height > 2
         case .arrow(let from, let to):
             return hypot(to.x - from.x, to.y - from.y) > 4

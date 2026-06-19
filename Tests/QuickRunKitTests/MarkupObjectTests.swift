@@ -15,6 +15,12 @@ final class MarkupObjectTests: XCTestCase {
         XCTAssertEqual(moved.kind, .rectangle(CGRect(x: 6, y: 8, width: 3, height: 4)))
     }
 
+    func testEllipseTranslates() {
+        let moved = object(.ellipse(CGRect(x: 1, y: 2, width: 3, height: 4)))
+            .translated(by: CGSize(width: 5, height: 6))
+        XCTAssertEqual(moved.kind, .ellipse(CGRect(x: 6, y: 8, width: 3, height: 4)))
+    }
+
     func testArrowTranslates() {
         let moved = object(.arrow(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 10, y: 10)))
             .translated(by: CGSize(width: 5, height: 3))
@@ -69,6 +75,11 @@ final class MarkupObjectTests: XCTestCase {
 
     func testLineWidthOutsetsBounds() {
         let bounds = object(.rectangle(CGRect(x: 10, y: 10, width: 10, height: 10)), lineWidth: 4).bounds
+        XCTAssertEqual(bounds, CGRect(x: 8, y: 8, width: 14, height: 14))
+    }
+
+    func testEllipseBoundsAreItsRectOutsetByLineWidth() {
+        let bounds = object(.ellipse(CGRect(x: 10, y: 10, width: 10, height: 10)), lineWidth: 4).bounds
         XCTAssertEqual(bounds, CGRect(x: 8, y: 8, width: 14, height: 14))
     }
 }

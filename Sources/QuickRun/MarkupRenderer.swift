@@ -43,6 +43,11 @@ enum MarkupDrawing {
             path.lineWidth = width
             path.stroke()
 
+        case .ellipse(let rect):
+            let path = NSBezierPath(ovalIn: rect.standardized)
+            path.lineWidth = width
+            path.stroke()
+
         case .arrow(let from, let to):
             drawArrow(from: from, to: to, width: width, color: color)
 
