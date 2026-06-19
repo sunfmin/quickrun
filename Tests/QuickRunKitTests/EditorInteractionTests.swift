@@ -85,4 +85,8 @@ final class EditorInteractionTests: XCTestCase {
     func testTextToolBeginsText() {
         XCTAssertEqual(resolve(tool: .text, at: CGPoint(x: 400, y: 350)), .beginText)
     }
+
+    func testEmojiToolPlacesEmoji() {
+        XCTAssertEqual(resolve(tool: .emoji, at: CGPoint(x: 400, y: 350)), .placeEmoji)
+    }
 }

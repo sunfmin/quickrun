@@ -50,6 +50,10 @@ public struct MarkupObject: Equatable, Identifiable {
         case arrow(from: CGPoint, to: CGPoint)
         /// A text label and its frame in capture space (the glue measures the frame).
         case text(String, CGRect)
+        /// An emoji glyph stamped at a point, with its frame in capture space.
+        /// Mirrors `text` in the model but is placed on click, sized by the
+        /// style's font size, and ignores the stroke colour.
+        case emoji(String, CGRect)
         case freehand([CGPoint])
         case highlight([CGPoint])
         /// A region whose underlying pixels are pixelated when the Capture is
@@ -77,6 +81,8 @@ public struct MarkupObject: Equatable, Identifiable {
                                to: CGPoint(x: to.x + dx, y: to.y + dy))
         case .text(let string, let rect):
             copy.kind = .text(string, rect.offsetBy(dx: dx, dy: dy))
+        case .emoji(let string, let rect):
+            copy.kind = .emoji(string, rect.offsetBy(dx: dx, dy: dy))
         case .freehand(let points):
             copy.kind = .freehand(points.map { CGPoint(x: $0.x + dx, y: $0.y + dy) })
         case .highlight(let points):
@@ -97,7 +103,7 @@ public struct MarkupObject: Equatable, Identifiable {
             return rect.standardized.insetBy(dx: -pad, dy: -pad)
         case .arrow(let from, let to):
             return Self.boundingBox([from, to]).insetBy(dx: -pad, dy: -pad)
-        case .text(_, let rect):
+        case .text(_, let rect), .emoji(_, let rect):
             return rect.standardized
         case .freehand(let points), .highlight(let points):
             return Self.boundingBox(points).insetBy(dx: -pad, dy: -pad)

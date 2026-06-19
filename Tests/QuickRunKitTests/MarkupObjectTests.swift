@@ -33,6 +33,12 @@ final class MarkupObjectTests: XCTestCase {
         XCTAssertEqual(moved.kind, .text("hi", CGRect(x: 2, y: 4, width: 10, height: 10)))
     }
 
+    func testEmojiTranslates() {
+        let moved = object(.emoji("👍", CGRect(x: 1, y: 2, width: 10, height: 10)))
+            .translated(by: CGSize(width: 3, height: 4))
+        XCTAssertEqual(moved.kind, .emoji("👍", CGRect(x: 4, y: 6, width: 10, height: 10)))
+    }
+
     func testFreehandTranslatesEveryPoint() {
         let moved = object(.freehand([CGPoint(x: 0, y: 0), CGPoint(x: 2, y: 2)]))
             .translated(by: CGSize(width: 1, height: 1))
@@ -70,6 +76,11 @@ final class MarkupObjectTests: XCTestCase {
 
     func testTextBoundsAreItsFrame() {
         let bounds = object(.text("hi", CGRect(x: 4, y: 5, width: 20, height: 12))).bounds
+        XCTAssertEqual(bounds, CGRect(x: 4, y: 5, width: 20, height: 12))
+    }
+
+    func testEmojiBoundsAreItsFrame() {
+        let bounds = object(.emoji("🔥", CGRect(x: 4, y: 5, width: 20, height: 12))).bounds
         XCTAssertEqual(bounds, CGRect(x: 4, y: 5, width: 20, height: 12))
     }
 

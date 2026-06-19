@@ -22,6 +22,8 @@ public enum EditorInteraction: Equatable {
     case deselect
     /// Start a text label at this point.
     case beginText
+    /// Stamp the current emoji at this point.
+    case placeEmoji
     /// Start drawing a new mark with the active drawing tool.
     case drawMarkup
 
@@ -31,7 +33,8 @@ public enum EditorInteraction: Equatable {
     /// 2. a Recognized word (Select tool) — looked up before it can start a mark;
     /// 3. an existing mark (Select tool), topmost first — selected and moved;
     /// 4. empty space inside the region (Select tool) — moves the whole region;
-    /// 5. otherwise the active tool acts — text places a label, a drawing tool draws.
+    /// 5. otherwise the active tool acts — text places a label, emoji stamps a
+    ///    glyph, a drawing tool draws.
     ///
     /// `wordRects` are the clickable Recognized-word hit areas in region space,
     /// passed only when words are clickable (they are not while a drawing tool is
@@ -59,6 +62,10 @@ public enum EditorInteraction: Equatable {
             }
             return .deselect
         }
-        return tool == .text ? .beginText : .drawMarkup
+        switch tool {
+        case .text: return .beginText
+        case .emoji: return .placeEmoji
+        default: return .drawMarkup
+        }
     }
 }

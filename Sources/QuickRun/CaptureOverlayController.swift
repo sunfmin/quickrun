@@ -158,6 +158,7 @@ final class CaptureOverlayController: NSObject {
         view.selectedID = viewModel.selectedObjectID
         view.tool = viewModel.currentTool
         view.activeStyle = viewModel.defaultStyle
+        view.currentEmoji = viewModel.currentEmoji
         for (tool, button) in toolButtons { button.isActive = tool == viewModel.currentTool }
         // Ring the swatch and width dot that match the active style.
         let style = viewModel.defaultStyle
@@ -170,6 +171,39 @@ final class CaptureOverlayController: NSObject {
     @objc private func toolTapped(_ sender: NSButton) {
         guard let tool = toolButtons.first(where: { $0.value === sender })?.key else { return }
         viewModel.selectTool(tool)
+        refresh()
+    }
+
+    /// Common reaction/pointer emoji for the picker.
+    private static let emojiChoices = ["👍", "✅", "❌", "⭐️", "❤️", "🔥", "⚠️", "➡️",
+                                       "⬇️", "💡", "❓", "📌", "🎉", "👀", "🚀", "😀"]
+
+    private func makeEmojiButton() -> ToolButton {
+        let button = ToolButton(symbol: "face.smiling", tooltip: "Emoji")
+        button.target = self
+        button.action = #selector(emojiTapped(_:))
+        toolButtons[.emoji] = button
+        return button
+    }
+
+    /// Tapping the Emoji tool opens a small picker; choosing an emoji selects the
+    /// Emoji tool, after which a click on the Capture stamps it.
+    @objc private func emojiTapped(_ sender: NSButton) {
+        let menu = NSMenu()
+        let size = NSFont.systemFontSize * 1.4
+        for emoji in Self.emojiChoices {
+            let item = NSMenuItem(title: emoji, action: #selector(emojiPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.attributedTitle = NSAttributedString(
+                string: emoji, attributes: [.font: NSFont.systemFont(ofSize: size)])
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    @objc private func emojiPicked(_ sender: NSMenuItem) {
+        viewModel.setCurrentEmoji(sender.title)
+        viewModel.selectTool(.emoji)
         refresh()
     }
 
@@ -275,24 +309,28 @@ final class CaptureOverlayController: NSObject {
         bar.layer?.masksToBounds = true
         bar.translatesAutoresizingMaskIntoConstraints = false
 
+        // Reference layout (#28): shapes → emoji → arrow → pen → highlighter →
+        // pixelate → text → copy-text. The emoji button is inserted after the
+        // shapes; it opens the picker rather than just selecting the tool.
         let tools: [(MarkupTool, String, String)] = [
             (.select, "cursorarrow", "Select"),
             (.rectangle, "rectangle", "Rectangle"),
             (.ellipse, "circle", "Ellipse"),
             (.arrow, "arrow.up.right", "Arrow"),
-            (.text, "textformat", "Text"),
             (.freehand, "pencil.tip", "Pen"),
             (.highlight, "highlighter", "Highlighter"),
             (.blur, "square.grid.3x3.fill", "Blur / redact"),
+            (.text, "textformat", "Text"),
         ]
         toolButtons = [:]
-        let toolViews: [NSView] = tools.map { tool, symbol, tooltip in
+        var toolViews: [NSView] = tools.map { tool, symbol, tooltip in
             let button = ToolButton(symbol: symbol, tooltip: tooltip)
             button.target = self
             button.action = #selector(toolTapped(_:))
             toolButtons[tool] = button
             return button
         }
+        toolViews.insert(makeEmojiButton(), at: 3) // after Select, Rectangle, Ellipse
 
         let undo = makeButton(symbol: "arrow.uturn.backward", tooltip: "Undo", action: #selector(undoTapped))
         let redo = makeButton(symbol: "arrow.uturn.forward", tooltip: "Redo", action: #selector(redoTapped))
@@ -416,6 +454,8 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     var selectedID: UUID? { didSet { needsDisplay = true } }
     var tool: MarkupTool = .select
     var activeStyle = MarkupStyle()
+    /// The emoji the Emoji tool stamps, pushed in by the controller.
+    var currentEmoji = "👍"
 
     /// A clickable Recognized word and its hit area in frozen-screen view points.
     struct WordHit { var text: String; var rect: CGRect }
@@ -657,6 +697,8 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
             movingID = nil
         case .beginText:
             beginText(at: point)
+        case .placeEmoji:
+            placeEmoji(at: point)
         case .drawMarkup:
             markDragStart = point
             strokePoints = [point]
@@ -741,8 +783,8 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
             if let id = movingID, moveOffset != .zero { onMoveMark?(id, moveOffset) }
         case .rectangle, .ellipse, .arrow, .freehand, .highlight, .blur:
             if let kind = pendingKind, Self.isCommittable(kind) { onCommitMark?(kind) }
-        case .text:
-            break
+        case .text, .emoji:
+            break // placed on mouse-down, not on a drag
         }
         markDragStart = nil
         strokePoints = []
@@ -776,9 +818,20 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
             return hypot(to.x - from.x, to.y - from.y) > 4
         case .freehand(let points), .highlight(let points):
             return points.count >= 2
-        case .text:
+        case .text, .emoji:
             return true
         }
+    }
+
+    // MARK: - Emoji
+
+    /// Stamp the current emoji centred on `point`, sized by the style's font size,
+    /// and commit it immediately (no editable field, unlike text).
+    private func placeEmoji(at point: CGPoint) {
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: activeStyle.fontSize)]
+        let size = (currentEmoji as NSString).size(withAttributes: attributes)
+        let origin = CGPoint(x: point.x - size.width / 2, y: point.y - size.height / 2)
+        onCommitMark?(.emoji(currentEmoji, CGRect(origin: origin, size: size)))
     }
 
     // MARK: - Text entry

@@ -8,6 +8,7 @@ public enum MarkupTool: Equatable {
     case ellipse
     case arrow
     case text
+    case emoji
     case freehand
     case highlight
     case blur
@@ -34,6 +35,8 @@ public final class EditorViewModel {
     public private(set) var selectedObjectID: UUID?
     /// Style applied to newly drawn objects (and to the selection when restyled).
     public private(set) var defaultStyle: MarkupStyle
+    /// The emoji stamped by the Emoji tool, chosen from the picker.
+    public private(set) var currentEmoji: String
 
     public init(recognizedWords: [String] = [], document: MarkupDocument = MarkupDocument()) {
         self.recognizedWords = recognizedWords
@@ -42,6 +45,7 @@ public final class EditorViewModel {
         self.currentTool = .select
         self.selectedObjectID = nil
         self.defaultStyle = MarkupStyle()
+        self.currentEmoji = "👍"
     }
 
     // MARK: - Recognized words
@@ -77,6 +81,11 @@ public final class EditorViewModel {
 
     public func select(objectID: UUID?) {
         selectedObjectID = objectID
+    }
+
+    /// Choose the emoji the Emoji tool stamps.
+    public func setCurrentEmoji(_ emoji: String) {
+        currentEmoji = emoji
     }
 
     // MARK: - Editing (delegates to the document, keeps selection coherent)

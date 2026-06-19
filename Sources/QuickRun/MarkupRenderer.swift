@@ -58,6 +58,13 @@ enum MarkupDrawing {
             ]
             string.draw(in: rect.standardized, withAttributes: attributes)
 
+        case .emoji(let string, let rect):
+            // Emoji carry their own colour; the stroke ink is ignored.
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: CGFloat(object.style.fontSize)),
+            ]
+            string.draw(in: rect.standardized, withAttributes: attributes)
+
         case .freehand(let points):
             let path = strokePath(points)
             path.lineWidth = width

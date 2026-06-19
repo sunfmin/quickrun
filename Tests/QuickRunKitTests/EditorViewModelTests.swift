@@ -51,6 +51,23 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(EditorViewModel().copyText(), .copyText(""))
     }
 
+    func testHasADefaultEmoji() {
+        XCTAssertEqual(EditorViewModel().currentEmoji, "👍")
+    }
+
+    func testSetCurrentEmojiChoosesTheStamp() {
+        let vm = EditorViewModel()
+        vm.setCurrentEmoji("🔥")
+        XCTAssertEqual(vm.currentEmoji, "🔥")
+    }
+
+    func testPlacingAnEmojiSelectsIt() {
+        let vm = EditorViewModel()
+        let emoji = MarkupObject(kind: .emoji("👍", CGRect(x: 0, y: 0, width: 20, height: 20)))
+        vm.addObject(emoji)
+        XCTAssertEqual(vm.selectedObjectID, emoji.id)
+    }
+
     func testStartsOnSelectTool() {
         XCTAssertEqual(EditorViewModel().currentTool, .select)
     }
