@@ -1,34 +1,46 @@
 import CoreGraphics
 import Foundation
 
-/// Turns a captured frame into the per-row hashes `ScrollStitcher` compares.
+/// Turns a captured frame into the per-row descriptors `ScrollStitcher` compares.
+/// Each row becomes a small vector of **block averages** — the row split into a
+/// fixed number of horizontal blocks, each reduced to its average byte value.
 /// Pure CoreGraphics — no AppKit or ScreenCaptureKit — so it is unit-testable
 /// with a synthetic `CGImage`.
+///
+/// Block averaging (rather than a per-row hash) is what makes overlap detection
+/// survive real scrolling: a subpixel vertical shift blends adjacent rows and a
+/// hash of the raw bytes would change completely, but the block averages move
+/// only slightly, so `ScrollStitcher.rowsMatch` still recognises the row within
+/// tolerance.
 public enum RowSignature {
-    /// One FNV-1a hash per pixel row of `image`, top to bottom. Identical rows
-    /// hash equal (so an unchanged band across two frames is detected as
-    /// overlap); rows that differ in any byte hash differently. Returns `[]` if
-    /// the pixel data can't be read.
-    public static func rows(of image: CGImage) -> [UInt64] {
+    /// One descriptor per pixel row of `image`, top to bottom — `blocks` average
+    /// byte values across the row. Returns `[]` if the pixel data can't be read.
+    public static func descriptors(of image: CGImage, blocks: Int = 16) -> [[UInt8]] {
         guard let data = image.dataProvider?.data,
               let pointer = CFDataGetBytePtr(data) else { return [] }
         let length = CFDataGetLength(data)
         let bytesPerRow = image.bytesPerRow
         let height = image.height
-        // Hash only the meaningful bytes of each row, not any trailing padding.
+        // Average only the meaningful bytes of each row, not any trailing padding.
         let bytesPerPixel = max(1, image.bitsPerPixel / 8)
         let rowBytes = min(bytesPerRow, image.width * bytesPerPixel)
+        let blockCount = max(1, blocks)
 
-        var result = [UInt64]()
+        var result = [[UInt8]]()
         result.reserveCapacity(height)
         for y in 0..<height {
             let base = y * bytesPerRow
             guard base + rowBytes <= length else { break }
-            var hash: UInt64 = 1469598103934665603 // FNV-1a offset basis
-            for x in 0..<rowBytes {
-                hash = (hash ^ UInt64(pointer[base + x])) &* 1099511628211
+            var descriptor = [UInt8](repeating: 0, count: blockCount)
+            for block in 0..<blockCount {
+                let start = block * rowBytes / blockCount
+                let end = (block + 1) * rowBytes / blockCount
+                guard end > start else { continue }
+                var sum = 0
+                for x in start..<end { sum += Int(pointer[base + x]) }
+                descriptor[block] = UInt8(sum / (end - start))
             }
-            result.append(hash)
+            result.append(descriptor)
         }
         return result
     }

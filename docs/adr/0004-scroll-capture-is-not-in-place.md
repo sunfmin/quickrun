@@ -27,11 +27,18 @@ capture needs live content and its own surface.
    is live again; the **Main Box** stays drawn at the same screen coordinates as a
    thin, **click-through outline** (no dimming), so the user's scroll reaches the
    app beneath it. The box is **locked** — no resize or move — for the run.
-3. **User scrolls; QuickRun grabs and stitches.** Each frame is a ScreenCaptureKit
-   grab of the Main Box; consecutive frames are reduced to **row signatures** and
-   stitched by overlap. The user scrolls — QuickRun does **not** synthesize
-   scrolls. All the stitching maths is the pure `ScrollStitcher` / `RowSignature`
-   in QuickRunKit, testable with synthetic arrays.
+3. **User scrolls freely; QuickRun grabs and assembles.** Each frame is a
+   ScreenCaptureKit grab of the Main Box, reduced to **row descriptors** (a small
+   vector of block averages per pixel row). Frames are assembled by a **vertical
+   mosaic** (`ScrollMosaic`), not a one-way append: each frame is aligned against
+   the page captured so far, near where the previous frame sat, and may grow the
+   page off the **top or bottom**. So the user can scroll **up and down at will** —
+   scrolling up attaches new rows above; scrolling back over seen content is
+   recognised as a repeat and dropped, never duplicated. The user scrolls —
+   QuickRun does **not** synthesize scrolls. The match is **tolerant** (real rows
+   never byte-match after subpixel resampling), and all the maths is pure
+   (`ScrollMosaic` / `ScrollStitcher` / `RowSignature` in QuickRunKit), testable
+   with synthetic arrays.
 4. **Scroll Preview.** A pane beside the Main Box (right, or left when there's no
    room) shows the *whole* Scroll Capture live, with **no scrollbar**: it grows to
    fill the available screen height (downward, and upward if there's room), then
@@ -69,8 +76,10 @@ capture needs live content and its own surface.
   which has its own capture space (its full pixel height).
 - Screen Recording permission (already required by ADR 0003) covers the grabs. No
   input is synthesized, so no grant beyond ADR 0001/0003 is needed.
-- **Known risk** (not solved by the row-signature approach alone): sub-pixel
-  scrolling, sticky headers/footers that repeat across frames, and scrolling faster
-  than the grab interval (which can drop content between frames) can fool overlap
-  detection. The user-driven pace and a short grab interval mitigate; the risk is
-  tuned against real targets.
+- **Known risk** (not fully solved by the mosaic): sticky headers/footers that
+  repeat across frames can match the wrong band, and scrolling faster than a screen
+  per grab interval leaves no overlap, so that frame can't be aligned and is dropped
+  (content between frames is lost until the user scrolls back over it). Tolerant,
+  block-averaged matching absorbs subpixel resampling; the user-driven pace, a short
+  grab interval, and anchoring the search near the last position mitigate the rest.
+  The thresholds are tuned against real targets.

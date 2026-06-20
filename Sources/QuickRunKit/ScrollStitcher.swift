@@ -1,61 +1,47 @@
 import Foundation
 
-/// The pure core of scroll capture (ADR 0004): given the consecutive frames of a
-/// scrolling region as **row signatures** — one hash per pixel row, top to
-/// bottom — it finds how much each frame overlaps the one before and where each
-/// frame's top sits in the assembled tall image. It never touches raw pixels or
-/// ScreenCaptureKit, so it is testable with synthetic arrays.
+/// Row-level matching for scroll capture (ADR 0004). The assembly itself lives in
+/// `ScrollMosaic`; this is the shared primitive it builds on: how to decide two
+/// pixel rows are "the same".
 ///
-/// Direction: the user scrolls down, so new content enters at the bottom. Between
-/// an earlier frame `a` and a later frame `b`, the rows still on screen are `a`'s
-/// bottom rows, which are `b`'s top rows — so the overlap is the longest suffix
-/// of `a` equal to a prefix of `b`.
+/// The match is **tolerant**, not byte-exact. Real scrolled frames never reproduce
+/// a row byte-for-byte — subpixel/Retina resampling and compositor noise perturb
+/// every row — so an exact comparison would find almost no overlap and the page
+/// could never be aligned. Rows are compared by their block-averaged descriptors
+/// (see `RowSignature`) within a tolerance.
 public enum ScrollStitcher {
-    /// How many rows the later frame `b` shares with the earlier frame `a`: the
-    /// length of the longest suffix of `a` that equals a prefix of `b`. `0` when
-    /// nothing matches; the full count when the frames are identical (no scroll).
-    ///
-    /// Takes the *largest* such overlap — the standard greedy match. Repeated
-    /// rows (sticky headers/footers) can in principle yield a false match; that
-    /// robustness risk is owned by the driver (ADR 0004), not solved here.
-    public static func verticalOverlap(between a: [UInt64], _ b: [UInt64]) -> Int {
-        var overlap = min(a.count, b.count)
-        while overlap > 0 {
-            let aStart = a.count - overlap
-            var matched = true
-            for i in 0..<overlap where a[aStart + i] != b[i] {
-                matched = false
-                break
-            }
-            if matched { return overlap }
-            overlap -= 1
+    /// How forgiving matching is.
+    public struct Tolerance: Equatable {
+        /// Largest total absolute difference between two row descriptors (summed
+        /// over their blocks) for the rows to count as the same.
+        public let rowTolerance: Int
+        /// Fraction of a candidate band's rows that must match for the band to be
+        /// accepted as an alignment.
+        public let minMatchRatio: Double
+        /// Smallest overlapping band considered a real alignment — guards against
+        /// accepting a tiny coincidental match.
+        public let minOverlap: Int
+
+        public init(rowTolerance: Int, minMatchRatio: Double, minOverlap: Int) {
+            self.rowTolerance = rowTolerance
+            self.minMatchRatio = minMatchRatio
+            self.minOverlap = minOverlap
         }
-        return 0
+
+        /// Byte-exact, any overlap ≥ 1 — used by the synthetic mosaic tests where
+        /// rows are single-element descriptors.
+        public static let exact = Tolerance(rowTolerance: 0, minMatchRatio: 1, minOverlap: 1)
     }
 
-    /// The top y-offset (in rows) of each frame once stacked with overlaps
-    /// removed: the first frame at 0, each next shifted down by the previous
-    /// frame's non-overlapping height. The app composites the real CGImages at
-    /// these offsets to build the tall Capture.
-    public static func offsets(forFrames frames: [[UInt64]]) -> [Int] {
-        guard !frames.isEmpty else { return [] }
-        var offsets = [0]
-        for i in 1..<frames.count {
-            let overlap = verticalOverlap(between: frames[i - 1], frames[i])
-            offsets.append(offsets[i - 1] + (frames[i - 1].count - overlap))
+    /// Whether two row descriptors are the same within `tolerance` (total absolute
+    /// difference across their blocks). Differing lengths never match.
+    public static func rowsMatch(_ x: [UInt8], _ y: [UInt8], tolerance: Int) -> Bool {
+        guard x.count == y.count else { return false }
+        var diff = 0
+        for i in 0..<x.count {
+            diff += abs(Int(x[i]) - Int(y[i]))
+            if diff > tolerance { return false }
         }
-        return offsets
-    }
-
-    /// Total height (in rows) of the stitched image for `frames`.
-    public static func stitchedHeight(forFrames frames: [[UInt64]]) -> Int {
-        guard let last = frames.last, let lastOffset = offsets(forFrames: frames).last else { return 0 }
-        return lastOffset + last.count
-    }
-
-    /// Whether the latest frame `b` added nothing new over `a` — the overlap is
-    /// the whole frame, so scrolling has reached the end.
-    public static func reachedEnd(_ a: [UInt64], _ b: [UInt64]) -> Bool {
-        !a.isEmpty && a.count == b.count && verticalOverlap(between: a, b) == a.count
+        return true
     }
 }

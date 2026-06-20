@@ -19,21 +19,33 @@ final class RowSignatureTests: XCTestCase {
         return ctx.makeImage()!
     }
 
-    func testOneSignaturePerRow() {
-        let sigs = RowSignature.rows(of: image(rowGreys: [10, 20, 30]))
-        XCTAssertEqual(sigs.count, 3)
+    func testOneDescriptorPerRow() {
+        let descriptors = RowSignature.descriptors(of: image(rowGreys: [10, 20, 30]))
+        XCTAssertEqual(descriptors.count, 3)
     }
 
-    func testIdenticalRowsHashEqual() {
-        let sigs = RowSignature.rows(of: image(rowGreys: [42, 42, 99]))
-        XCTAssertEqual(sigs[0], sigs[1], "identical rows must hash equal")
-        XCTAssertNotEqual(sigs[1], sigs[2], "different rows must hash differently")
+    func testDescriptorBlockCountIsRequested() {
+        let descriptors = RowSignature.descriptors(of: image(rowGreys: [10], width: 8), blocks: 4)
+        XCTAssertEqual(descriptors.first?.count, 4)
     }
 
-    func testSignaturesFeedOverlapDetection() {
-        // Two frames sharing their middle band: a scrolled-by-one capture.
-        let a = RowSignature.rows(of: image(rowGreys: [1, 2, 3, 4]))
-        let b = RowSignature.rows(of: image(rowGreys: [2, 3, 4, 5]))
-        XCTAssertEqual(ScrollStitcher.verticalOverlap(between: a, b), 3)
+    func testConstantRowAveragesToThatGrey() {
+        // Every block of a constant-grey row averages to the grey.
+        let descriptors = RowSignature.descriptors(of: image(rowGreys: [42]), blocks: 8)
+        XCTAssertEqual(descriptors.first, [UInt8](repeating: 42, count: 8))
+    }
+
+    func testIdenticalRowsDescribeEqual() {
+        let descriptors = RowSignature.descriptors(of: image(rowGreys: [42, 42, 99]))
+        XCTAssertEqual(descriptors[0], descriptors[1], "identical rows must describe equal")
+        XCTAssertNotEqual(descriptors[1], descriptors[2], "different rows must describe differently")
+    }
+
+    func testDescriptorsFeedTheMosaic() {
+        // Two frames sharing their top/bottom band stitch into one continuous page.
+        var mosaic = ScrollMosaic(tolerance: .exact, maxShift: 100, minAdvance: 1)
+        XCTAssertTrue(mosaic.add(RowSignature.descriptors(of: image(rowGreys: [1, 2, 3, 4]))))
+        XCTAssertTrue(mosaic.add(RowSignature.descriptors(of: image(rowGreys: [2, 3, 4, 5]))))
+        XCTAssertEqual(mosaic.height, 5) // [1,2,3,4] + one new row
     }
 }
