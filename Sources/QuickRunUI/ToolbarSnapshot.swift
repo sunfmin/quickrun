@@ -10,9 +10,10 @@ import QuickRunKit
 /// size/weight, colours, radii, spacing, the active-tool chip — are the real ones.
 /// `NSVisualEffectView` blur can't render offscreen, so the bar is shown on a card
 /// that approximates the `.menu` material; that's a faithful stand-in for layout
-/// and colour review. The composition here mirrors `CaptureOverlayController`.
-enum ToolbarSnapshot {
-    static func render(toDirectory directory: String) {
+/// and colour review. The editor bar renders the shared `EditorToolbarContent`; only
+/// the scroll-capture pill is still composed locally (mirrors `ScrollPreviewPane`).
+public enum ToolbarSnapshot {
+    public static func render(toDirectory directory: String) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 

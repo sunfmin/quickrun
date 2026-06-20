@@ -23,9 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Default hotkey: ⌥D (key code + Carbon modifier mask, matched by code).
     private let defaultHotkey = Hotkey(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey))
 
-    // First-run defaults; thereafter the user's stored Sources win.
+    // First-run defaults; thereafter the user's stored Sources win. 有道 leads, so
+    // the Panel opens on it.
     private let defaultSources = [
-        Source(name: "必应词典", urlTemplate: "https://cn.bing.com/dict/search?q={q}"),
         Source(name: "有道词典", urlTemplate: "https://dict.youdao.com/result?word={q}&lang=en"),
         Source(name: "Google", urlTemplate: "https://www.google.com/search?q={q}"),
     ]

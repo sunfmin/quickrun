@@ -1,4 +1,5 @@
 import AppKit
+import QuickRunUI
 
 // Dev-only: render the toolbars to PNGs and exit, without launching the app.
 let arguments = CommandLine.arguments

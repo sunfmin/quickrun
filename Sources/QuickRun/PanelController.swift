@@ -1,6 +1,7 @@
 import AppKit
 import WebKit
 import QuickRunKit
+import QuickRunUI
 
 /// The Panel: an editable Query field and a Source tab bar above a stack of
 /// `WKWebView`s (one per Source) that perform top-level navigation — not HTML
@@ -14,11 +15,10 @@ import QuickRunKit
 /// dismisses on Esc or click-away, and restores focus to the prior app.
 final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private let panel: NSPanel
-    private let queryField = NSTextField()
-    private let lens = NSImageView()
-    private let settingsButton = NSButton()
-    private let tabBar = SourceTabBar(frame: .zero)
-    private let webContainer = NSView()
+    private let queryField: NSTextField
+    private let settingsButton: NSButton
+    private let tabBar: SourceTabBar
+    private let webContainer: NSView
 
     /// Called when the masthead's gear is clicked — the Panel's only in-window
     /// route to Settings, since the title bar (and any ⌘, menu) is hidden.
@@ -34,18 +34,6 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     /// When dismissing into Settings, skip restoring focus to the prior app so
     /// the Settings window stays frontmost.
     private var suppressFocusRestore = false
-
-    /// Height of the translucent instrument bar (Query row + hairline + Source
-    /// row + hairline) above the web content.
-    private let topInset: CGFloat = 88
-
-    /// A full-bleed 1pt rule that tracks light/dark, pinned by its top edge.
-    private func hairline(width: CGFloat, y: CGFloat) -> NSView {
-        let rule = DynamicLayerView(frame: NSRect(x: 0, y: y, width: width, height: 1))
-        rule.fillColor = .separatorColor
-        rule.autoresizingMask = [.width, .minYMargin]
-        return rule
-    }
 
     /// Appended to each web view's User-Agent so it contains the "Safari" token.
     /// 必应词典 sniffs the UA: browsers it recognises as Safari get an HTML5
@@ -70,6 +58,12 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
             backing: .buffered,
             defer: false
         )
+        // Build the masthead once, shared with the offscreen snapshot.
+        let chrome = PanelChrome.build(frame: frame)
+        queryField = chrome.queryField
+        settingsButton = chrome.settingsButton
+        tabBar = chrome.tabBar
+        webContainer = chrome.contentRegion
         super.init()
 
         panel.title = "QuickRun"
@@ -88,65 +82,14 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
             panel.standardWindowButton(button)?.isHidden = true
         }
 
-        // Translucent material for the instrument bar — fitting for a panel that
-        // floats over whatever you were reading. The opaque web views cover the
-        // rest, so the vibrancy only shows through the top bar.
-        let content = NSVisualEffectView(frame: frame)
-        content.material = .titlebar
-        content.state = .active
-        content.blendingMode = .behindWindow
-        content.autoresizingMask = [.width, .height]
-
-        let lensConfig = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
-        lens.image = NSImage(systemSymbolName: "text.magnifyingglass", accessibilityDescription: "Look up")?
-            .withSymbolConfiguration(lensConfig)
-        lens.contentTintColor = .secondaryLabelColor
-        lens.frame = NSRect(x: 18, y: frame.height - 37, width: 22, height: 22)
-        lens.autoresizingMask = [.minYMargin]
-        content.addSubview(lens)
-
-        let gearConfig = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
-            .withSymbolConfiguration(gearConfig)
-        settingsButton.isBordered = false
-        settingsButton.setButtonType(.momentaryChange)
-        settingsButton.contentTintColor = .secondaryLabelColor
-        settingsButton.imagePosition = .imageOnly
-        settingsButton.toolTip = "Settings"
+        // Wire the chrome's controls to this controller (the snapshot leaves them inert).
         settingsButton.target = self
         settingsButton.action = #selector(openSettings)
-        settingsButton.frame = NSRect(x: frame.width - 18 - 22, y: frame.height - 37, width: 22, height: 22)
-        settingsButton.autoresizingMask = [.minXMargin, .minYMargin]
-        content.addSubview(settingsButton)
-
-        queryField.frame = NSRect(x: 48, y: frame.height - 40, width: frame.width - 48 - 52, height: 28)
-        queryField.autoresizingMask = [.width, .minYMargin]
-        queryField.placeholderString = "Look up…"
-        queryField.font = .quickRunSerif(ofSize: 22, weight: .medium)
-        queryField.textColor = .labelColor
-        queryField.isBordered = false
-        queryField.drawsBackground = false
-        queryField.focusRingType = .none
-        queryField.cell?.usesSingleLineMode = true
-        queryField.cell?.isScrollable = true
         queryField.target = self
         queryField.action = #selector(submit)
-        content.addSubview(queryField)
-
-        content.addSubview(hairline(width: frame.width, y: frame.height - 53))
-
-        tabBar.frame = NSRect(x: 48, y: frame.height - 87, width: frame.width - 48 - 18, height: 34)
-        tabBar.autoresizingMask = [.width, .minYMargin]
         tabBar.onSelect = { [weak self] index in self?.tabSelected(index) }
-        content.addSubview(tabBar)
 
-        content.addSubview(hairline(width: frame.width, y: frame.height - topInset))
-
-        webContainer.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height - topInset)
-        webContainer.autoresizingMask = [.width, .height]
-        content.addSubview(webContainer)
-
-        panel.contentView = content
+        panel.contentView = chrome.content
 
         // Restore the last size/position, then let AppKit autosave further
         // resizes and moves. A restored frame counts as placed, so present()

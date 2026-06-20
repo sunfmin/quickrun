@@ -1,17 +1,6 @@
 import AppKit
 import QuickRunKit
-
-extension NSColor {
-    convenience init(_ color: RGBAColor) {
-        self.init(srgbRed: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
-    }
-
-    var rgba: RGBAColor {
-        let c = usingColorSpace(.sRGB) ?? self
-        return RGBAColor(red: Double(c.redComponent), green: Double(c.greenComponent),
-                         blue: Double(c.blueComponent), alpha: Double(c.alphaComponent))
-    }
-}
+import QuickRunUI
 
 /// Draws Markup objects into the current graphics context, which the caller has
 /// already set up so that one unit equals one point of capture space. Shared by

@@ -1,5 +1,6 @@
 import AppKit
 import QuickRunKit
+import QuickRunUI
 
 /// The live Scroll Preview (ADR 0004): a borderless pane beside the Main Box that
 /// shows the *whole* Scroll Capture as it accumulates — no scrollbar. It grows to

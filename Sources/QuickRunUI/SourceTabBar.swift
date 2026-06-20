@@ -4,15 +4,15 @@ import AppKit
 /// that rhymes with 有道's red brand mark — used only for the active Source's
 /// underline and the Query caret. Everything else is system-semantic so it
 /// adapts to light/dark and the translucent material behind it.
-enum Palette {
-    static let accent = NSColor(red: 0.84, green: 0.27, blue: 0.24, alpha: 1)
+public enum Palette {
+    public static let accent = NSColor(red: 0.84, green: 0.27, blue: 0.24, alpha: 1)
 }
 
 extension NSFont {
     /// Apple's New York serif — the family face shared across QuickRun's windows:
     /// the Panel's Query headword and the Settings section headers. Dictionaries
     /// set headwords in serif, so it ties the chrome to the subject.
-    static func quickRunSerif(ofSize size: CGFloat, weight: NSFont.Weight) -> NSFont {
+    public static func quickRunSerif(ofSize size: CGFloat, weight: NSFont.Weight) -> NSFont {
         let system = NSFont.systemFont(ofSize: size, weight: weight)
         guard let descriptor = system.fontDescriptor.withDesign(.serif) else { return system }
         return NSFont(descriptor: descriptor, size: size) ?? system
@@ -23,9 +23,9 @@ extension NSFont {
 /// that slides under the active Source. Replaces NSSegmentedControl so the
 /// active Source reads like the masthead of a dictionary entry — ink label over
 /// a red rule — rather than a system-blue toolbar segment.
-final class SourceTabBar: NSView {
+public final class SourceTabBar: NSView {
     /// Called with the tapped Source index when the user picks a tab.
-    var onSelect: ((Int) -> Void)?
+    public var onSelect: ((Int) -> Void)?
 
     private var buttons: [NSButton] = []
     private let underline = NSView()
@@ -34,9 +34,9 @@ final class SourceTabBar: NSView {
     private static let gap: CGFloat = 22
     private static let underlineHeight: CGFloat = 2
 
-    private(set) var selectedIndex = 0
+    public private(set) var selectedIndex = 0
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         underline.wantsLayer = true
         underline.layer?.backgroundColor = Palette.accent.cgColor
@@ -44,10 +44,10 @@ final class SourceTabBar: NSView {
         addSubview(underline)
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     /// Rebuild the row for `names`, selecting the first Source.
-    func configure(_ names: [String]) {
+    public func configure(_ names: [String]) {
         buttons.forEach { $0.removeFromSuperview() }
         buttons = names.enumerated().map { index, name in
             let button = NSButton(title: name, target: self, action: #selector(tap(_:)))
@@ -64,7 +64,7 @@ final class SourceTabBar: NSView {
     }
 
     /// Move the selection (and slide the rule) without firing `onSelect`.
-    func select(_ index: Int, animated: Bool = true) {
+    public func select(_ index: Int, animated: Bool = true) {
         guard buttons.indices.contains(index) else { return }
         selectedIndex = index
         applySelection(animated: animated)
@@ -75,7 +75,7 @@ final class SourceTabBar: NSView {
         onSelect?(sender.tag)
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         layoutButtons()
         applySelection(animated: false)

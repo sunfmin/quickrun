@@ -1,5 +1,6 @@
 import AppKit
 import QuickRunKit
+import QuickRunUI
 
 /// The Editor, redesigned as an in-place overlay (ADR 0003): a borderless,
 /// full-display window showing the frozen screen dimmed, on which the user drags

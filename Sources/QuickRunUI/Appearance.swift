@@ -9,27 +9,27 @@ import AppKit
 /// that appearance's grey forever. Resolving the dynamic colours inside
 /// `updateLayer()`, which AppKit re-runs whenever the effective appearance
 /// changes, keeps them tracking the system theme.
-final class DynamicLayerView: NSView {
-    var fillColor: NSColor? { didSet { needsDisplay = true } }
-    var borderColor: NSColor? { didSet { needsDisplay = true } }
-    var borderWidth: CGFloat = 0 { didSet { needsDisplay = true } }
-    var cornerRadius: CGFloat = 0 { didSet { needsDisplay = true } }
+public final class DynamicLayerView: NSView {
+    public var fillColor: NSColor? { didSet { needsDisplay = true } }
+    public var borderColor: NSColor? { didSet { needsDisplay = true } }
+    public var borderWidth: CGFloat = 0 { didSet { needsDisplay = true } }
+    public var cornerRadius: CGFloat = 0 { didSet { needsDisplay = true } }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override var wantsUpdateLayer: Bool { true }
+    public override var wantsUpdateLayer: Bool { true }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true // re-resolve the dynamic colours for the new appearance
     }
 
-    override func updateLayer() {
+    public override func updateLayer() {
         // `.cgColor` resolves against the current drawing appearance, which AppKit
         // sets to this view's effectiveAppearance for the duration of updateLayer.
         layer?.backgroundColor = fillColor?.cgColor

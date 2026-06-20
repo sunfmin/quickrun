@@ -1,5 +1,6 @@
 import AppKit
 import QuickRunKit
+import QuickRunUI
 
 /// Settings window: a table of Sources (name + URL template) with add / remove /
 /// move, persisted through the SourceStore. A URL template missing the `{q}`

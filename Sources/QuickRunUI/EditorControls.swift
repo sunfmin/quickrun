@@ -3,16 +3,16 @@ import QuickRunKit
 
 /// Shared look for the floating toolbars (Editor and Scroll Preview): one icon
 /// weight/size and one card radius, so the two bars read as the same family.
-enum ToolbarStyle {
+public enum ToolbarStyle {
     /// Slightly larger, medium-weight glyphs — crisper and more legible than the
     /// default template size, the main lift over the old toolbar.
     static let symbol = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
     /// The rounded-card corner radius of the bar itself.
-    static let cornerRadius: CGFloat = 13
+    public static let cornerRadius: CGFloat = 13
     /// Buttons are square, so the active-tool chip is a square and every icon has
     /// equal margins on all four sides.
-    static let buttonSize: CGFloat = 30
-    static let rowSpacing: CGFloat = 8
+    public static let buttonSize: CGFloat = 30
+    public static let rowSpacing: CGFloat = 8
     /// Corner radius of the square selection chip — shared by the active-tool chip
     /// and the selected swatch/width chips, so "selected" is one shape everywhere.
     static let chipRadius: CGFloat = 6
@@ -37,7 +37,7 @@ enum ToolbarStyle {
 
     /// A muted brick red for the discard/Cancel action — calmer than `systemRed`,
     /// so it still signals "destructive" without shouting against the graphite chrome.
-    static let destructive = NSColor(red: 0.80, green: 0.36, blue: 0.34, alpha: 1)
+    public static let destructive = NSColor(red: 0.80, green: 0.36, blue: 0.34, alpha: 1)
 
     /// Graphite wash behind a segment field — the recessed pill that brackets each
     /// functional group (tools · scroll-capture · history · finish). One opacity for
@@ -61,7 +61,7 @@ enum ToolbarStyle {
 
     /// A toolbar icon at the shared weight, normalised to a uniform footprint so
     /// every glyph is one size and stays inside its square chip.
-    static func icon(_ name: String, _ accessibility: String) -> NSImage? {
+    public static func icon(_ name: String, _ accessibility: String) -> NSImage? {
         guard let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibility)?
             .withSymbolConfiguration(symbol) else { return nil }
         let natural = image.size
@@ -74,10 +74,10 @@ enum ToolbarStyle {
 
 /// A toolbar tool button that wears a seal-red pill while it is the active tool,
 /// so the held tool reads at a glance instead of as a faint tint.
-final class ToolButton: NSButton {
-    var isActive = false { didSet { updateAppearance() } }
+public final class ToolButton: NSButton {
+    public var isActive = false { didSet { updateAppearance() } }
 
-    init(symbol: String, tooltip: String) {
+    public init(symbol: String, tooltip: String) {
         super.init(frame: .zero)
         image = ToolbarStyle.icon(symbol, tooltip)
         imagePosition = .imageOnly
@@ -92,9 +92,9 @@ final class ToolButton: NSButton {
         updateAppearance()
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateAppearance() // re-resolve the chip's layer colour for the new light/dark
     }
@@ -115,12 +115,12 @@ final class ToolButton: NSButton {
 
 /// A round colour swatch — the toolbar's current-ink chip and each preset in the
 /// colour popover.
-final class SwatchButton: NSButton {
-    var color: RGBAColor { didSet { needsDisplay = true } }
-    var isSelectedSwatch = false { didSet { needsDisplay = true } }
+public final class SwatchButton: NSButton {
+    public var color: RGBAColor { didSet { needsDisplay = true } }
+    public var isSelectedSwatch = false { didSet { needsDisplay = true } }
     private let circleDiameter: CGFloat
 
-    init(color: RGBAColor, diameter: CGFloat, target: AnyObject?, action: Selector?) {
+    public init(color: RGBAColor, diameter: CGFloat, target: AnyObject?, action: Selector?) {
         self.color = color
         self.circleDiameter = diameter
         super.init(frame: .zero)
@@ -135,9 +135,9 @@ final class SwatchButton: NSButton {
         heightAnchor.constraint(equalToConstant: ToolbarStyle.buttonSize).isActive = true
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         // Selected state is a square chip, like the active-tool chip — one selection
         // shape across the whole toolbar.
         if isSelectedSwatch {
@@ -160,11 +160,11 @@ final class SwatchButton: NSButton {
 /// A stroke-width preset in the inline strip, drawn as a centred filled dot whose
 /// size tracks the width it sets. Wears the accent ring (and accent fill) while
 /// it is the active width, the swatch's counterpart for `StylePresets.widths`.
-final class WidthDotButton: NSButton {
-    let width: Double
-    var isSelectedWidth = false { didSet { needsDisplay = true } }
+public final class WidthDotButton: NSButton {
+    public let width: Double
+    public var isSelectedWidth = false { didSet { needsDisplay = true } }
 
-    init(width: Double, target: AnyObject?, action: Selector?) {
+    public init(width: Double, target: AnyObject?, action: Selector?) {
         self.width = width
         super.init(frame: .zero)
         self.target = target
@@ -178,9 +178,9 @@ final class WidthDotButton: NSButton {
         heightAnchor.constraint(equalToConstant: ToolbarStyle.buttonSize).isActive = true
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         if isSelectedWidth {
             let chip = NSBezierPath(roundedRect: bounds, xRadius: ToolbarStyle.chipRadius, yRadius: ToolbarStyle.chipRadius)
             ToolbarStyle.selectionChip.setFill()
@@ -203,18 +203,18 @@ final class WidthDotButton: NSButton {
 /// live `NSPanel` + `NSVisualEffectView`, or a flat snapshot card) and wires actions
 /// onto the returned handles — `NSVisualEffectView` blur is the one thing that cannot
 /// render offscreen, so the chrome is the only part that legitimately differs.
-struct EditorToolbarContent {
+public struct EditorToolbarContent {
     /// The non-tool buttons, keyed so a caller can wire each to its action (or leave
     /// it inert, as the snapshot does).
-    enum Action: CaseIterable {
+    public enum Action: CaseIterable {
         case scrollCapture, undo, redo, delete, copyText, copyImage, save, cancel
     }
 
-    let view: NSView
-    let toolButtons: [MarkupTool: ToolButton]
-    let actionButtons: [Action: NSButton]
-    let swatchButtons: [SwatchButton]
-    let widthButtons: [WidthDotButton]
+    public let view: NSView
+    public let toolButtons: [MarkupTool: ToolButton]
+    public let actionButtons: [Action: NSButton]
+    public let swatchButtons: [SwatchButton]
+    public let widthButtons: [WidthDotButton]
 
     /// Visual order of the tool segment (#28). Emoji sits after the shapes; it opens a
     /// picker rather than just selecting, but it is still a tool button here — the
@@ -242,7 +242,7 @@ struct EditorToolbarContent {
         (.cancel, "xmark", "Cancel"),
     ]
 
-    static func build() -> EditorToolbarContent {
+    public static func build() -> EditorToolbarContent {
         var toolButtons: [MarkupTool: ToolButton] = [:]
         let toolViews: [NSView] = tools.map { tool, symbol, tooltip in
             let button = ToolButton(symbol: symbol, tooltip: tooltip)

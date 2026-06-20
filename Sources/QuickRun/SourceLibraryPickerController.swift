@@ -1,5 +1,6 @@
 import AppKit
 import QuickRunKit
+import QuickRunUI
 
 /// "Add from Library" sheet: a category sidebar on the left, the chosen
 /// category's catalog entries as a checklist on the right. Selection spans

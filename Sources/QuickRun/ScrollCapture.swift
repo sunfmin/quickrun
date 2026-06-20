@@ -1,6 +1,7 @@
 import AppKit
 import ScreenCaptureKit
 import QuickRunKit
+import QuickRunUI
 
 /// The non-interactive overlay drawn over the scroll-capture region while it
 /// runs: a bright border and the "Scroll the page to capture more" prompt. Its
