@@ -80,6 +80,27 @@ final class ScrollMosaicTests: XCTestCase {
         XCTAssertEqual(m.height, 6)
     }
 
+    func testAmbiguousMatchIsDropped() {
+        // A repetitive page: the band [1,2] matches at two distinct places, so a
+        // frame that is only that band is too ambiguous to place — dropping it
+        // beats guessing and stitching in already-captured content.
+        var m = mosaic()
+        m.add(frame([1, 2, 3, 1, 2, 3]))
+        XCTAssertFalse(m.add(frame([1, 2])))
+        XCTAssertEqual(page(m), [1, 2, 3, 1, 2, 3])
+    }
+
+    func testStrongerEvidenceWinsOverAWeakerFalseMatch() {
+        // The band [5,6,7,8] matches strongly (4 rows) at one place and only weakly
+        // (the lone repeated [5]) elsewhere — the strong, unique alignment is taken,
+        // extending the page by the new row.
+        var m = ScrollMosaic(tolerance: ScrollStitcher.Tolerance(rowTolerance: 0, minMatchRatio: 1, minOverlap: 2),
+                             maxShift: 100, minAdvance: 1)
+        m.add(frame([5, 1, 2, 3, 4, 5, 6, 7, 8]))
+        XCTAssertTrue(m.add(frame([5, 6, 7, 8, 9])))
+        XCTAssertEqual(page(m), [5, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    }
+
     func testViewportIsTrackedAcrossDroppedFrames() {
         // After scrolling down then idling (dropped repeats), the search anchor
         // stays with the viewport, so the next downward frame still aligns.

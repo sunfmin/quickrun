@@ -27,15 +27,24 @@ public struct ScrollMosaic {
     /// or jittering page adds nothing and is treated as a repeat.
     private let minAdvance: Int
 
+    /// How decisive an alignment must be to be trusted. If a second, distinct
+    /// position matches at least this fraction as well as the best, the evidence is
+    /// ambiguous (repetitive content, or the user scrolled too far for a confident
+    /// overlap), so the frame is dropped rather than placed wrong — which would
+    /// stitch in content already on the page. Dropping (the user re-scrolls) beats
+    /// duplicating. A value in (0, 1]; closer to 1 is stricter.
+    private let ambiguityRatio: Double
+
     /// Where the previous frame aligned, in current canvas coordinates — the anchor
     /// the next frame's search centres on. Updated on every aligned grab (even a
     /// repeat) so the search follows the viewport as the user scrolls.
     private var lastAlignment = 0
 
-    public init(tolerance: ScrollStitcher.Tolerance, maxShift: Int, minAdvance: Int) {
+    public init(tolerance: ScrollStitcher.Tolerance, maxShift: Int, minAdvance: Int, ambiguityRatio: Double = 0.95) {
         self.tolerance = tolerance
         self.maxShift = maxShift
         self.minAdvance = minAdvance
+        self.ambiguityRatio = ambiguityRatio
     }
 
     /// Total height of the assembled page in rows.
@@ -78,11 +87,14 @@ public struct ScrollMosaic {
 
     /// The frame's best top-row position (canvas coordinates, may be negative for
     /// content above the current top) searching ±`maxShift` around the last
-    /// alignment, or `nil` if nothing within the window matches well enough.
+    /// alignment, or `nil` if nothing within the window matches well enough — or if
+    /// the best match is ambiguous (a second, distinct position matches nearly as
+    /// well, so placing the frame would risk duplicating content).
     private func bestAlignment(of frame: [[UInt8]]) -> Int? {
         let h = frame.count
-        var best: Int?
-        var bestRatio = 0.0
+        // Each accepted position with how many rows actually matched there — the
+        // strength of the evidence for that alignment.
+        var candidates: [(top: Int, matched: Int)] = []
         for top in (lastAlignment - maxShift)...(lastAlignment + maxShift) {
             let overlapStart = max(top, 0)
             let overlapEnd = min(top + h, canvas.count)
@@ -91,22 +103,26 @@ public struct ScrollMosaic {
 
             let allowed = Int(Double(len) * (1 - tolerance.minMatchRatio))
             var mismatched = 0
-            var matched = true
             for k in 0..<len where !ScrollStitcher.rowsMatch(frame[overlapStart - top + k], canvas[overlapStart + k], tolerance: tolerance.rowTolerance) {
                 mismatched += 1
-                if mismatched > allowed { matched = false; break }
+                if mismatched > allowed { break }
             }
-            guard matched else { continue }
-
-            let ratio = Double(len - mismatched) / Double(len)
-            // Best match wins; ties break toward the position nearest the anchor,
-            // which keeps a consistent alignment on repetitive content.
-            if best == nil || ratio > bestRatio ||
-                (ratio == bestRatio && abs(top - lastAlignment) < abs(best! - lastAlignment)) {
-                best = top
-                bestRatio = ratio
-            }
+            guard mismatched <= allowed else { continue }
+            candidates.append((top, len - mismatched))
         }
-        return best
+
+        // Prefer the position backed by the most matched rows; ties break toward the
+        // anchor, which keeps a consistent alignment as the user scrolls.
+        guard let best = candidates.max(by: {
+            $0.matched != $1.matched ? $0.matched < $1.matched
+                                     : abs($0.top - lastAlignment) > abs($1.top - lastAlignment)
+        }) else { return nil }
+
+        // Reject if a genuinely different position is nearly as strong — weak or
+        // repetitive evidence we shouldn't gamble on (the fast-scroll case).
+        for candidate in candidates where abs(candidate.top - best.top) >= tolerance.minOverlap {
+            if Double(candidate.matched) >= ambiguityRatio * Double(best.matched) { return nil }
+        }
+        return best.top
     }
 }
