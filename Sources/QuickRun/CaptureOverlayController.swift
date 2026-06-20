@@ -230,6 +230,7 @@ final class CaptureOverlayController: NSObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        close() // a finishing action: closing the overlay is the "done" feedback, like Copy image
     }
     @objc private func saveTapped() { saveAndClose() }
     @objc private func cancelTapped() { close() }
@@ -308,6 +309,10 @@ final class CaptureOverlayController: NSObject {
         let pane = ScrollPreviewPane(mainBox: regionScreen, screen: frozen.screen,
                                      scale: frozen.scale, saveLocation: saveLocation)
         pane.onFinish = { [weak self] in self?.scrollDriver?.stop() } // Copy/Save = done
+        pane.onCancel = { [weak self] in // X button = Esc
+            self?.scrollCancelled = true
+            self?.scrollDriver?.stop()
+        }
         pane.show()
         scrollPane = pane
 
@@ -406,8 +411,10 @@ final class CaptureOverlayController: NSObject {
         bar.blendingMode = .behindWindow
         bar.state = .active
         bar.wantsLayer = true
-        bar.layer?.cornerRadius = 10
+        bar.layer?.cornerRadius = ToolbarStyle.cornerRadius
         bar.layer?.masksToBounds = true
+        bar.layer?.borderWidth = 0.5
+        bar.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.4).cgColor
         bar.translatesAutoresizingMaskIntoConstraints = false
 
         // Reference layout (#28): shapes → emoji → arrow → pen → highlighter →
@@ -420,7 +427,7 @@ final class CaptureOverlayController: NSObject {
             (.arrow, "arrow.up.right", "Arrow"),
             (.freehand, "pencil.tip", "Pen"),
             (.highlight, "highlighter", "Highlighter"),
-            (.blur, "square.grid.3x3.fill", "Blur / redact"),
+            (.blur, "square.grid.3x3", "Blur / redact"),
             (.text, "textformat", "Text"),
         ]
         toolButtons = [:]
@@ -438,25 +445,43 @@ final class CaptureOverlayController: NSObject {
         let delete = makeButton(symbol: "trash", tooltip: "Delete", action: #selector(deleteTapped))
 
         let scrollCapture = makeButton(symbol: "arrow.up.and.down", tooltip: "Scroll capture", action: #selector(scrollCaptureTapped))
+
+        // The finishing actions — every one of these ends the capture (Copy text and
+        // Copy image close after copying; Save closes after writing). A faint tray
+        // groups them so it reads at a glance as the "done" zone, set apart from the
+        // tools/edit buttons to its left. Monochrome line icons keep it calm. Cancel
+        // sits just outside the tray as the discard counterpart, marked by its red.
         let copyText = makeButton(symbol: "doc.plaintext", tooltip: "Copy recognized text", action: #selector(copyTextTapped))
-
-        let copy = makeButton(symbol: "doc.on.clipboard.fill", tooltip: "Copy to clipboard", action: #selector(copyTapped))
-        copy.contentTintColor = .systemGreen
+        let copy = makeButton(symbol: "doc.on.clipboard", tooltip: "Copy to clipboard", action: #selector(copyTapped))
         let save = makeButton(symbol: "square.and.arrow.down", tooltip: "Save to folder", action: #selector(saveTapped))
-        let cancel = makeButton(symbol: "xmark.circle.fill", tooltip: "Cancel", action: #selector(cancelTapped))
-        cancel.contentTintColor = .systemRed
+        let finishTray = makeFinishTray([copyText, copy, save])
 
-        let row = NSStackView(views: toolViews + [scrollCapture, copyText, divider(), undo, redo, delete,
-                                                  divider(), copy, save, cancel])
+        let cancel = makeButton(symbol: "xmark", tooltip: "Cancel", action: #selector(cancelTapped))
+        cancel.contentTintColor = ToolbarStyle.destructive
+
+        let editDivider = divider()
+        let row = NSStackView(views: toolViews + [scrollCapture, editDivider, undo, redo, delete,
+                                                  finishTray, cancel])
         row.orientation = .horizontal
-        row.spacing = 7
+        row.spacing = ToolbarStyle.rowSpacing
+        let groupGap: CGFloat = 14
+        row.setCustomSpacing(groupGap, after: scrollCapture)
+        row.setCustomSpacing(groupGap, after: editDivider)
+        row.setCustomSpacing(18, after: delete) // wider gap → the finish zone reads apart
+        row.setCustomSpacing(10, after: finishTray)
 
-        let column = NSStackView(views: [row, buildStyleStrip()])
+        let strip = buildStyleStrip()
+        let column = NSStackView(views: [row, strip])
         column.orientation = .vertical
+        // Centre both rows so the bar keeps equal left/right insets (a `.leading`
+        // column silently drops the trailing edgeInset for the widest row, leaving
+        // the Cancel button flush against the right edge). The strip is left-aligned
+        // separately: it spans the row's width and packs its content to the left.
         column.alignment = .centerX
-        column.spacing = 6
-        column.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        column.spacing = 10
+        column.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
         column.translatesAutoresizingMaskIntoConstraints = false
+        strip.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
 
         bar.addSubview(column)
         panel.contentView = bar
@@ -472,18 +497,23 @@ final class CaptureOverlayController: NSObject {
         toolbar = panel
     }
 
-    /// The persistent ink + width strip: width-preset dots, then a hairline, then
-    /// the colour swatches — all from `StylePresets`, the single source of truth.
-    private func buildStyleStrip() -> NSView {
+    /// The persistent ink + width strip: width-preset dots then the colour swatches,
+    /// all from `StylePresets`, the single source of truth.
+    private func buildStyleStrip() -> NSStackView {
         widthButtons = StylePresets.widths.map { width in
             WidthDotButton(width: width, target: self, action: #selector(widthTapped(_:)))
         }
         swatchButtons = StylePresets.colors.map { color in
             SwatchButton(color: color, diameter: 22, target: self, action: #selector(swatchTapped(_:)))
         }
-        let strip = NSStackView(views: widthButtons + [divider()] + swatchButtons)
+        // Width presets then colour swatches. The strip is stretched to the tool
+        // row's width; `.equalSpacing` spreads the boxes edge-to-edge with one even
+        // gap, so the row fills the bar — leftmost dot under the first tool, last
+        // swatch under Cancel — with no empty tail.
+        let strip = NSStackView(views: widthButtons + swatchButtons)
         strip.orientation = .horizontal
-        strip.spacing = 8
+        strip.spacing = 8 // minimum gap; equalSpacing widens it evenly to fill
+        strip.distribution = .equalSpacing
         return strip
     }
 
@@ -508,7 +538,7 @@ final class CaptureOverlayController: NSObject {
 
     private func makeButton(symbol: String, tooltip: String, action: Selector?) -> NSButton {
         let button = NSButton()
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
+        button.image = ToolbarStyle.icon(symbol, tooltip)
         button.imagePosition = .imageOnly
         button.isBordered = false
         button.setButtonType(.momentaryChange)
@@ -517,7 +547,8 @@ final class CaptureOverlayController: NSObject {
         button.target = self
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        button.widthAnchor.constraint(equalToConstant: ToolbarStyle.buttonSize).isActive = true
+        button.heightAnchor.constraint(equalToConstant: ToolbarStyle.buttonSize).isActive = true
         return button
     }
 
@@ -526,8 +557,32 @@ final class CaptureOverlayController: NSObject {
         line.fillColor = .separatorColor
         line.translatesAutoresizingMaskIntoConstraints = false
         line.widthAnchor.constraint(equalToConstant: 1).isActive = true
-        line.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        line.heightAnchor.constraint(equalToConstant: 22).isActive = true
         return line
+    }
+
+    /// A faint rounded tray that groups the finishing actions into a "done" zone —
+    /// clicking any button inside ends the capture. The tray is exactly button-tall
+    /// (with horizontal padding) so it does not change the row height.
+    private func makeFinishTray(_ buttons: [NSView]) -> NSView {
+        let stack = NSStackView(views: buttons)
+        stack.orientation = .horizontal
+        stack.spacing = ToolbarStyle.rowSpacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let tray = DynamicLayerView()
+        tray.fillColor = ToolbarStyle.finishTray
+        tray.cornerRadius = 9
+        tray.translatesAutoresizingMaskIntoConstraints = false
+        tray.addSubview(stack)
+        let pad: CGFloat = 6
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: tray.leadingAnchor, constant: pad),
+            stack.trailingAnchor.constraint(equalTo: tray.trailingAnchor, constant: -pad),
+            stack.topAnchor.constraint(equalTo: tray.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: tray.bottomAnchor),
+        ])
+        return tray
     }
 }
 
