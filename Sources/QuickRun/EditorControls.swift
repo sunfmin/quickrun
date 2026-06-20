@@ -39,9 +39,25 @@ enum ToolbarStyle {
     /// so it still signals "destructive" without shouting against the graphite chrome.
     static let destructive = NSColor(red: 0.80, green: 0.36, blue: 0.34, alpha: 1)
 
-    /// Faint graphite wash behind the finishing-actions tray — enough to read as a
-    /// grouped "done" zone without competing with the active-tool chip.
-    static var finishTray: NSColor { selection.withAlphaComponent(0.10) }
+    /// Graphite wash behind a segment field — the recessed pill that brackets each
+    /// functional group (tools · scroll-capture · history · finish). One opacity for
+    /// every field so the grouping reads as the bar's structure. A contrast ladder
+    /// keeps the layers legible: field (this) < `finishField` (the emphasised "done"
+    /// zone) < `selectionChip` (the active-tool / selected chip that must still pop
+    /// above its field).
+    static var segmentField: NSColor { selection.withAlphaComponent(0.14) }
+
+    /// A stronger wash for the finishing-actions field — the "done" zone reads a notch
+    /// heavier than the other fields so the eye lands on it as the way out.
+    static var finishField: NSColor { selection.withAlphaComponent(0.22) }
+
+    /// The selected-state chip behind the active tool, the selected swatch, and the
+    /// selected width dot — one shape *and* weight everywhere "selected" appears, sat
+    /// at the top of the field contrast ladder so it pops above the tools field.
+    static var selectionChip: NSColor { selection.withAlphaComponent(0.26) }
+
+    /// Corner radius of a segment field's recessed pill.
+    static let fieldRadius: CGFloat = 9
 
     /// A toolbar icon at the shared weight, normalised to a uniform footprint so
     /// every glyph is one size and stays inside its square chip.
@@ -89,7 +105,7 @@ final class ToolButton: NSButton {
         var chip = NSColor.clear.cgColor
         if isActive {
             effectiveAppearance.performAsCurrentDrawingAppearance {
-                chip = ToolbarStyle.selection.withAlphaComponent(0.16).cgColor
+                chip = ToolbarStyle.selectionChip.cgColor
             }
         }
         layer?.backgroundColor = chip
@@ -126,7 +142,7 @@ final class SwatchButton: NSButton {
         // shape across the whole toolbar.
         if isSelectedSwatch {
             let chip = NSBezierPath(roundedRect: bounds, xRadius: ToolbarStyle.chipRadius, yRadius: ToolbarStyle.chipRadius)
-            ToolbarStyle.selection.withAlphaComponent(0.16).setFill()
+            ToolbarStyle.selectionChip.setFill()
             chip.fill()
         }
         let dot = NSBezierPath(ovalIn: NSRect(x: bounds.midX - circleDiameter / 2,
@@ -167,7 +183,7 @@ final class WidthDotButton: NSButton {
     override func draw(_ dirtyRect: NSRect) {
         if isSelectedWidth {
             let chip = NSBezierPath(roundedRect: bounds, xRadius: ToolbarStyle.chipRadius, yRadius: ToolbarStyle.chipRadius)
-            ToolbarStyle.selection.withAlphaComponent(0.16).setFill()
+            ToolbarStyle.selectionChip.setFill()
             chip.fill()
         }
         let diameter = min(bounds.width - 6, CGFloat(width) + 5)
@@ -176,5 +192,151 @@ final class WidthDotButton: NSButton {
                                               width: diameter, height: diameter))
         (isSelectedWidth ? ToolbarStyle.selection : NSColor.secondaryLabelColor).setFill()
         dot.fill()
+    }
+}
+
+/// The editor toolbar's content — the segmented tool row plus the ink/width strip —
+/// built once from `ToolbarStyle` + `StylePresets`. The live capture overlay
+/// (`CaptureOverlayController`) and the offscreen snapshot (`ToolbarSnapshot`) both
+/// build *this* tree, so there is a single layout definition instead of a hand-
+/// mirrored copy that drifts. Each caller supplies its own chrome around `view` (a
+/// live `NSPanel` + `NSVisualEffectView`, or a flat snapshot card) and wires actions
+/// onto the returned handles — `NSVisualEffectView` blur is the one thing that cannot
+/// render offscreen, so the chrome is the only part that legitimately differs.
+struct EditorToolbarContent {
+    /// The non-tool buttons, keyed so a caller can wire each to its action (or leave
+    /// it inert, as the snapshot does).
+    enum Action: CaseIterable {
+        case scrollCapture, undo, redo, delete, copyText, copyImage, save, cancel
+    }
+
+    let view: NSView
+    let toolButtons: [MarkupTool: ToolButton]
+    let actionButtons: [Action: NSButton]
+    let swatchButtons: [SwatchButton]
+    let widthButtons: [WidthDotButton]
+
+    /// Visual order of the tool segment (#28). Emoji sits after the shapes; it opens a
+    /// picker rather than just selecting, but it is still a tool button here — the
+    /// caller wires its picker action.
+    private static let tools: [(MarkupTool, String, String)] = [
+        (.select, "cursorarrow", "Select"),
+        (.rectangle, "rectangle", "Rectangle"),
+        (.ellipse, "circle", "Ellipse"),
+        (.emoji, "face.smiling", "Emoji"),
+        (.arrow, "arrow.up.right", "Arrow"),
+        (.freehand, "pencil.tip", "Pen"),
+        (.highlight, "highlighter", "Highlighter"),
+        (.blur, "square.grid.3x3", "Blur / redact"),
+        (.text, "textformat", "Text"),
+    ]
+
+    private static let actions: [(Action, String, String)] = [
+        (.scrollCapture, "arrow.up.and.down", "Scroll capture"),
+        (.undo, "arrow.uturn.backward", "Undo"),
+        (.redo, "arrow.uturn.forward", "Redo"),
+        (.delete, "trash", "Delete"),
+        (.copyText, "doc.plaintext", "Copy recognized text"),
+        (.copyImage, "doc.on.clipboard", "Copy to clipboard"),
+        (.save, "square.and.arrow.down", "Save to folder"),
+        (.cancel, "xmark", "Cancel"),
+    ]
+
+    static func build() -> EditorToolbarContent {
+        var toolButtons: [MarkupTool: ToolButton] = [:]
+        let toolViews: [NSView] = tools.map { tool, symbol, tooltip in
+            let button = ToolButton(symbol: symbol, tooltip: tooltip)
+            toolButtons[tool] = button
+            return button
+        }
+
+        var actionButtons: [Action: NSButton] = [:]
+        for (action, symbol, tooltip) in actions {
+            let button = actionButton(symbol: symbol, tooltip: tooltip)
+            if action == .cancel { button.contentTintColor = ToolbarStyle.destructive }
+            actionButtons[action] = button
+        }
+        func btn(_ a: Action) -> NSButton { actionButtons[a]! }
+
+        // Each functional group rides its own recessed field. Ordered as the capture
+        // workflow runs left→right: re-grab (scroll-capture) · annotate (tools) · undo
+        // (history) · finish. Scroll capture is not an annotation tool — it leaves the
+        // editor to re-grab a taller region (ADR 0004) — so it leads in its own field
+        // instead of reading as a ninth tool. The finish field wears a heavier wash as
+        // the "done" zone; cancel rides bare outside as discard, marked by its brick red.
+        let captureField = segment([btn(.scrollCapture)])
+        let toolsField = segment(toolViews)
+        let historyField = segment([btn(.undo), btn(.redo), btn(.delete)])
+        let finishField = segment([btn(.copyText), btn(.copyImage), btn(.save)], fill: ToolbarStyle.finishField)
+
+        let row = NSStackView(views: [captureField, toolsField, historyField, finishField, btn(.cancel)])
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.setCustomSpacing(12, after: finishField) // a touch more air before discard
+
+        // The persistent ink + width strip: width-preset dots then colour swatches,
+        // all from `StylePresets`, the single source of truth. Stretched to the tool
+        // row's width; `.equalSpacing` spreads the dots edge-to-edge with one even gap.
+        let widthButtons = StylePresets.widths.map { WidthDotButton(width: $0, target: nil, action: nil) }
+        let swatchButtons = StylePresets.colors.map { SwatchButton(color: $0, diameter: 22, target: nil, action: nil) }
+        let strip = NSStackView(views: widthButtons + swatchButtons)
+        strip.orientation = .horizontal
+        strip.spacing = 8
+        strip.distribution = .equalSpacing
+
+        // Centre both rows so the bar keeps equal left/right insets (a `.leading`
+        // column silently drops the trailing edgeInset for the widest row). The strip
+        // spans the row's width and packs its content to the left separately.
+        let column = NSStackView(views: [row, strip])
+        column.orientation = .vertical
+        column.alignment = .centerX
+        column.spacing = 10
+        column.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
+        column.translatesAutoresizingMaskIntoConstraints = false
+        strip.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
+
+        return EditorToolbarContent(view: column, toolButtons: toolButtons,
+                                    actionButtons: actionButtons,
+                                    swatchButtons: swatchButtons, widthButtons: widthButtons)
+    }
+
+    /// A plain (non-tool) toolbar button at the shared box/icon size, with no target —
+    /// the caller wires the action.
+    private static func actionButton(symbol: String, tooltip: String) -> NSButton {
+        let button = NSButton()
+        button.image = ToolbarStyle.icon(symbol, tooltip)
+        button.imagePosition = .imageOnly
+        button.isBordered = false
+        button.setButtonType(.momentaryChange)
+        button.contentTintColor = .secondaryLabelColor
+        button.toolTip = tooltip
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: ToolbarStyle.buttonSize).isActive = true
+        button.heightAnchor.constraint(equalToConstant: ToolbarStyle.buttonSize).isActive = true
+        return button
+    }
+
+    /// Wrap a group of buttons in a faint recessed field — the pill that brackets one
+    /// functional group so the grouping reads as the bar's structure. Exactly
+    /// button-tall (with horizontal padding) so it does not change the row height.
+    private static func segment(_ buttons: [NSView], fill: NSColor = ToolbarStyle.segmentField) -> NSView {
+        let stack = NSStackView(views: buttons)
+        stack.orientation = .horizontal
+        stack.spacing = ToolbarStyle.rowSpacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let field = DynamicLayerView()
+        field.fillColor = fill
+        field.cornerRadius = ToolbarStyle.fieldRadius
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.addSubview(stack)
+        let pad: CGFloat = 6
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: field.leadingAnchor, constant: pad),
+            stack.trailingAnchor.constraint(equalTo: field.trailingAnchor, constant: -pad),
+            stack.topAnchor.constraint(equalTo: field.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: field.bottomAnchor),
+        ])
+        return field
     }
 }

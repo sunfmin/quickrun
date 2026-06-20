@@ -26,99 +26,17 @@ enum ToolbarSnapshot {
         FileHandle.standardError.write("Rendered toolbar snapshots to \(dir.path)\n".data(using: .utf8)!)
     }
 
-    // MARK: - Editor toolbar (mirrors CaptureOverlayController.buildToolbar)
+    // MARK: - Editor toolbar (renders the shared EditorToolbarContent)
 
+    /// Build the *real* editor toolbar content and pose it with one active tool and a
+    /// selected swatch/width, so the snapshot reviews the same layout the live overlay
+    /// ships — no hand-mirrored copy to keep in sync.
     private static func editorToolbarColumn() -> NSView {
-        let tools: [(String, String, Bool)] = [
-            ("cursorarrow", "Select", false),
-            ("rectangle", "Rectangle", false),
-            ("circle", "Ellipse", false),
-            ("face.smiling", "Emoji", false),
-            ("arrow.up.right", "Arrow", false),
-            ("pencil.tip", "Pen", true), // show the active-tool chip
-            ("highlighter", "Highlighter", false),
-            ("square.grid.3x3", "Blur / redact", false),
-            ("textformat", "Text", false),
-        ]
-        var views: [NSView] = tools.map { symbol, tooltip, active in
-            let button = ToolButton(symbol: symbol, tooltip: tooltip)
-            button.isActive = active
-            return button
-        }
-        let scrollCapture = actionButton("arrow.up.and.down", tint: .secondaryLabelColor)
-        let editDivider = divider()
-        let delete = actionButton("trash", tint: .secondaryLabelColor)
-        let finishTray = Self.finishTray([
-            actionButton("doc.plaintext", tint: .secondaryLabelColor),
-            actionButton("doc.on.clipboard", tint: .secondaryLabelColor),
-            actionButton("square.and.arrow.down", tint: .secondaryLabelColor),
-        ])
-        views += [
-            scrollCapture,
-            editDivider,
-            actionButton("arrow.uturn.backward", tint: .secondaryLabelColor),
-            actionButton("arrow.uturn.forward", tint: .secondaryLabelColor),
-            delete,
-            finishTray,
-            actionButton("xmark", tint: ToolbarStyle.destructive),
-        ]
-
-        let row = NSStackView(views: views)
-        row.orientation = .horizontal
-        row.spacing = ToolbarStyle.rowSpacing
-        let groupGap: CGFloat = 14
-        row.setCustomSpacing(groupGap, after: scrollCapture)
-        row.setCustomSpacing(groupGap, after: editDivider)
-        row.setCustomSpacing(18, after: delete)
-        row.setCustomSpacing(10, after: finishTray)
-
-        let strip = styleStrip()
-        let column = NSStackView(views: [row, strip])
-        column.orientation = .vertical
-        column.alignment = .centerX
-        column.spacing = 10
-        column.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
-        strip.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
-        return column
-    }
-
-    /// Faint rounded tray grouping the finishing actions (mirrors `makeFinishTray`).
-    private static func finishTray(_ buttons: [NSView]) -> NSView {
-        let stack = NSStackView(views: buttons)
-        stack.orientation = .horizontal
-        stack.spacing = ToolbarStyle.rowSpacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        let tray = DynamicLayerView()
-        tray.fillColor = ToolbarStyle.finishTray
-        tray.cornerRadius = 9
-        tray.translatesAutoresizingMaskIntoConstraints = false
-        tray.addSubview(stack)
-        let pad: CGFloat = 6
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: tray.leadingAnchor, constant: pad),
-            stack.trailingAnchor.constraint(equalTo: tray.trailingAnchor, constant: -pad),
-            stack.topAnchor.constraint(equalTo: tray.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: tray.bottomAnchor),
-        ])
-        return tray
-    }
-
-    private static func styleStrip() -> NSStackView {
-        let widths = StylePresets.widths.enumerated().map { index, width -> WidthDotButton in
-            let dot = WidthDotButton(width: width, target: nil, action: nil)
-            dot.isSelectedWidth = index == 1
-            return dot
-        }
-        let swatches = StylePresets.colors.enumerated().map { index, color -> SwatchButton in
-            let swatch = SwatchButton(color: color, diameter: 22, target: nil, action: nil)
-            swatch.isSelectedSwatch = index == 0
-            return swatch
-        }
-        let strip = NSStackView(views: widths + swatches)
-        strip.orientation = .horizontal
-        strip.spacing = 8
-        strip.distribution = .equalSpacing
-        return strip
+        let content = EditorToolbarContent.build()
+        content.toolButtons[.freehand]?.isActive = true // show the active-tool chip
+        content.swatchButtons.first?.isSelectedSwatch = true
+        if content.widthButtons.indices.contains(1) { content.widthButtons[1].isSelectedWidth = true }
+        return content.view
     }
 
     // MARK: - Scroll-capture pill (mirrors ScrollPreviewPane)

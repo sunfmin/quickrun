@@ -187,14 +187,6 @@ final class CaptureOverlayController: NSObject {
     private static let emojiChoices = ["👍", "✅", "❌", "⭐️", "❤️", "🔥", "⚠️", "➡️",
                                        "⬇️", "💡", "❓", "📌", "🎉", "👀", "🚀", "😀"]
 
-    private func makeEmojiButton() -> ToolButton {
-        let button = ToolButton(symbol: "face.smiling", tooltip: "Emoji")
-        button.target = self
-        button.action = #selector(emojiTapped(_:))
-        toolButtons[.emoji] = button
-        return button
-    }
-
     /// Tapping the Emoji tool opens a small picker; choosing an emoji selects the
     /// Emoji tool, after which a click on the Capture stamps it.
     @objc private func emojiTapped(_ sender: NSButton) {
@@ -417,72 +409,43 @@ final class CaptureOverlayController: NSObject {
         bar.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.4).cgColor
         bar.translatesAutoresizingMaskIntoConstraints = false
 
-        // Reference layout (#28): shapes → emoji → arrow → pen → highlighter →
-        // pixelate → text → copy-text. The emoji button is inserted after the
-        // shapes; it opens the picker rather than just selecting the tool.
-        let tools: [(MarkupTool, String, String)] = [
-            (.select, "cursorarrow", "Select"),
-            (.rectangle, "rectangle", "Rectangle"),
-            (.ellipse, "circle", "Ellipse"),
-            (.arrow, "arrow.up.right", "Arrow"),
-            (.freehand, "pencil.tip", "Pen"),
-            (.highlight, "highlighter", "Highlighter"),
-            (.blur, "square.grid.3x3", "Blur / redact"),
-            (.text, "textformat", "Text"),
-        ]
-        toolButtons = [:]
-        var toolViews: [NSView] = tools.map { tool, symbol, tooltip in
-            let button = ToolButton(symbol: symbol, tooltip: tooltip)
+        // Build the shared content tree (segmented tool row + ink/width strip), then
+        // wire its handles to this controller's actions and keep them for state sync.
+        // `ToolbarSnapshot` builds the same tree for offscreen review.
+        let content = EditorToolbarContent.build()
+        toolButtons = content.toolButtons
+        swatchButtons = content.swatchButtons
+        widthButtons = content.widthButtons
+
+        for (tool, button) in content.toolButtons {
             button.target = self
-            button.action = #selector(toolTapped(_:))
-            toolButtons[tool] = button
-            return button
+            // Emoji opens the picker; every other tool just selects.
+            button.action = tool == .emoji ? #selector(emojiTapped(_:)) : #selector(toolTapped(_:))
         }
-        toolViews.insert(makeEmojiButton(), at: 3) // after Select, Rectangle, Ellipse
+        let actionSelectors: [EditorToolbarContent.Action: Selector] = [
+            .scrollCapture: #selector(scrollCaptureTapped),
+            .undo: #selector(undoTapped),
+            .redo: #selector(redoTapped),
+            .delete: #selector(deleteTapped),
+            .copyText: #selector(copyTextTapped),
+            .copyImage: #selector(copyTapped),
+            .save: #selector(saveTapped),
+            .cancel: #selector(cancelTapped),
+        ]
+        for (action, button) in content.actionButtons {
+            button.target = self
+            button.action = actionSelectors[action]
+        }
+        for swatch in content.swatchButtons {
+            swatch.target = self
+            swatch.action = #selector(swatchTapped(_:))
+        }
+        for dot in content.widthButtons {
+            dot.target = self
+            dot.action = #selector(widthTapped(_:))
+        }
 
-        let undo = makeButton(symbol: "arrow.uturn.backward", tooltip: "Undo", action: #selector(undoTapped))
-        let redo = makeButton(symbol: "arrow.uturn.forward", tooltip: "Redo", action: #selector(redoTapped))
-        let delete = makeButton(symbol: "trash", tooltip: "Delete", action: #selector(deleteTapped))
-
-        let scrollCapture = makeButton(symbol: "arrow.up.and.down", tooltip: "Scroll capture", action: #selector(scrollCaptureTapped))
-
-        // The finishing actions — every one of these ends the capture (Copy text and
-        // Copy image close after copying; Save closes after writing). A faint tray
-        // groups them so it reads at a glance as the "done" zone, set apart from the
-        // tools/edit buttons to its left. Monochrome line icons keep it calm. Cancel
-        // sits just outside the tray as the discard counterpart, marked by its red.
-        let copyText = makeButton(symbol: "doc.plaintext", tooltip: "Copy recognized text", action: #selector(copyTextTapped))
-        let copy = makeButton(symbol: "doc.on.clipboard", tooltip: "Copy to clipboard", action: #selector(copyTapped))
-        let save = makeButton(symbol: "square.and.arrow.down", tooltip: "Save to folder", action: #selector(saveTapped))
-        let finishTray = makeFinishTray([copyText, copy, save])
-
-        let cancel = makeButton(symbol: "xmark", tooltip: "Cancel", action: #selector(cancelTapped))
-        cancel.contentTintColor = ToolbarStyle.destructive
-
-        let editDivider = divider()
-        let row = NSStackView(views: toolViews + [scrollCapture, editDivider, undo, redo, delete,
-                                                  finishTray, cancel])
-        row.orientation = .horizontal
-        row.spacing = ToolbarStyle.rowSpacing
-        let groupGap: CGFloat = 14
-        row.setCustomSpacing(groupGap, after: scrollCapture)
-        row.setCustomSpacing(groupGap, after: editDivider)
-        row.setCustomSpacing(18, after: delete) // wider gap → the finish zone reads apart
-        row.setCustomSpacing(10, after: finishTray)
-
-        let strip = buildStyleStrip()
-        let column = NSStackView(views: [row, strip])
-        column.orientation = .vertical
-        // Centre both rows so the bar keeps equal left/right insets (a `.leading`
-        // column silently drops the trailing edgeInset for the widest row, leaving
-        // the Cancel button flush against the right edge). The strip is left-aligned
-        // separately: it spans the row's width and packs its content to the left.
-        column.alignment = .centerX
-        column.spacing = 10
-        column.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
-        column.translatesAutoresizingMaskIntoConstraints = false
-        strip.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
-
+        let column = content.view
         bar.addSubview(column)
         panel.contentView = bar
         NSLayoutConstraint.activate([
@@ -495,26 +458,6 @@ final class CaptureOverlayController: NSObject {
 
         window.addChildWindow(panel, ordered: .above)
         toolbar = panel
-    }
-
-    /// The persistent ink + width strip: width-preset dots then the colour swatches,
-    /// all from `StylePresets`, the single source of truth.
-    private func buildStyleStrip() -> NSStackView {
-        widthButtons = StylePresets.widths.map { width in
-            WidthDotButton(width: width, target: self, action: #selector(widthTapped(_:)))
-        }
-        swatchButtons = StylePresets.colors.map { color in
-            SwatchButton(color: color, diameter: 22, target: self, action: #selector(swatchTapped(_:)))
-        }
-        // Width presets then colour swatches. The strip is stretched to the tool
-        // row's width; `.equalSpacing` spreads the boxes edge-to-edge with one even
-        // gap, so the row fills the bar — leftmost dot under the first tool, last
-        // swatch under Cancel — with no empty tail.
-        let strip = NSStackView(views: widthButtons + swatchButtons)
-        strip.orientation = .horizontal
-        strip.spacing = 8 // minimum gap; equalSpacing widens it evenly to fill
-        strip.distribution = .equalSpacing
-        return strip
     }
 
     /// Place the toolbar just below the region (above it when there is no room),
@@ -534,55 +477,6 @@ final class CaptureOverlayController: NSObject {
         }
         y = min(y, display.maxY - size.height - 8)
         toolbar.setFrameOrigin(NSPoint(x: x, y: y))
-    }
-
-    private func makeButton(symbol: String, tooltip: String, action: Selector?) -> NSButton {
-        let button = NSButton()
-        button.image = ToolbarStyle.icon(symbol, tooltip)
-        button.imagePosition = .imageOnly
-        button.isBordered = false
-        button.setButtonType(.momentaryChange)
-        button.contentTintColor = .secondaryLabelColor
-        button.toolTip = tooltip
-        button.target = self
-        button.action = action
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: ToolbarStyle.buttonSize).isActive = true
-        button.heightAnchor.constraint(equalToConstant: ToolbarStyle.buttonSize).isActive = true
-        return button
-    }
-
-    private func divider() -> NSView {
-        let line = DynamicLayerView()
-        line.fillColor = .separatorColor
-        line.translatesAutoresizingMaskIntoConstraints = false
-        line.widthAnchor.constraint(equalToConstant: 1).isActive = true
-        line.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        return line
-    }
-
-    /// A faint rounded tray that groups the finishing actions into a "done" zone —
-    /// clicking any button inside ends the capture. The tray is exactly button-tall
-    /// (with horizontal padding) so it does not change the row height.
-    private func makeFinishTray(_ buttons: [NSView]) -> NSView {
-        let stack = NSStackView(views: buttons)
-        stack.orientation = .horizontal
-        stack.spacing = ToolbarStyle.rowSpacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        let tray = DynamicLayerView()
-        tray.fillColor = ToolbarStyle.finishTray
-        tray.cornerRadius = 9
-        tray.translatesAutoresizingMaskIntoConstraints = false
-        tray.addSubview(stack)
-        let pad: CGFloat = 6
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: tray.leadingAnchor, constant: pad),
-            stack.trailingAnchor.constraint(equalTo: tray.trailingAnchor, constant: -pad),
-            stack.topAnchor.constraint(equalTo: tray.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: tray.bottomAnchor),
-        ])
-        return tray
     }
 }
 
