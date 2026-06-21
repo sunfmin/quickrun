@@ -15,7 +15,9 @@ public enum ToolbarStyle {
     public static let rowSpacing: CGFloat = 8
     /// Corner radius of the square selection chip — shared by the active-tool chip
     /// and the selected swatch/width chips, so "selected" is one shape everywhere.
-    static let chipRadius: CGFloat = 6
+    /// Matches `fieldRadius` so a selected end-item nests flush in its field with no
+    /// lighter sliver at the corner.
+    static let chipRadius: CGFloat = 9
     /// Uniform glyph footprint (largest dimension) inside the square button. SF
     /// Symbols render at very different sizes for one point size — a tall glyph
     /// would otherwise overflow the 30pt button (NSButton does not clip its image),
@@ -274,25 +276,34 @@ public struct EditorToolbarContent {
         row.spacing = 10
         row.setCustomSpacing(12, after: finishField) // a touch more air before discard
 
-        // The persistent ink + width strip: width-preset dots then colour swatches,
-        // all from `StylePresets`, the single source of truth. Stretched to the tool
-        // row's width; `.equalSpacing` spreads the dots edge-to-edge with one even gap.
+        // The ink strip mirrors the tool row above: the width presets ride one
+        // recessed field and the colour swatches another, so "weight" and "colour"
+        // read as two groups in the same segment-field language as the bar — all from
+        // `StylePresets`, the single source of truth.
         let widthButtons = StylePresets.widths.map { WidthDotButton(width: $0, target: nil, action: nil) }
         let swatchButtons = StylePresets.colors.map { SwatchButton(color: $0, diameter: 22, target: nil, action: nil) }
-        let strip = NSStackView(views: widthButtons + swatchButtons)
+        // The colour field carries the strip out to the tool row's full width (pinned
+        // below), so its swatches spread with `.equalSpacing`; the width field keeps
+        // its natural size and the two rows' edges line up.
+        let widthsField = segment(widthButtons)
+        let colorsField = segment(swatchButtons, distribution: .equalSpacing)
+        widthsField.setContentHuggingPriority(.required, for: .horizontal)
+        colorsField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let strip = NSStackView(views: [widthsField, colorsField])
         strip.orientation = .horizontal
-        strip.spacing = 8
-        strip.distribution = .equalSpacing
+        strip.spacing = 10
+        strip.distribution = .fill
 
         // Centre both rows so the bar keeps equal left/right insets (a `.leading`
-        // column silently drops the trailing edgeInset for the widest row). The strip
-        // spans the row's width and packs its content to the left separately.
+        // column silently drops the trailing edgeInset for the widest row).
         let column = NSStackView(views: [row, strip])
         column.orientation = .vertical
         column.alignment = .centerX
         column.spacing = 10
         column.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
         column.translatesAutoresizingMaskIntoConstraints = false
+        // Both rows span the same width so their left/right edges line up and the card
+        // keeps equal side insets; the colour field absorbs the difference.
         strip.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
 
         return EditorToolbarContent(view: column, toolButtons: toolButtons,
@@ -319,10 +330,12 @@ public struct EditorToolbarContent {
     /// Wrap a group of buttons in a faint recessed field — the pill that brackets one
     /// functional group so the grouping reads as the bar's structure. Exactly
     /// button-tall (with horizontal padding) so it does not change the row height.
-    private static func segment(_ buttons: [NSView], fill: NSColor = ToolbarStyle.segmentField) -> NSView {
+    private static func segment(_ buttons: [NSView], fill: NSColor = ToolbarStyle.segmentField,
+                                distribution: NSStackView.Distribution? = nil) -> NSView {
         let stack = NSStackView(views: buttons)
         stack.orientation = .horizontal
         stack.spacing = ToolbarStyle.rowSpacing
+        if let distribution { stack.distribution = distribution }
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let field = DynamicLayerView()
@@ -330,10 +343,12 @@ public struct EditorToolbarContent {
         field.cornerRadius = ToolbarStyle.fieldRadius
         field.translatesAutoresizingMaskIntoConstraints = false
         field.addSubview(stack)
-        let pad: CGFloat = 6
+        // No inner pad: the field hugs its buttons so a selected item's chip sits
+        // flush against the field edge — clicking the first/last item fits snugly
+        // instead of leaving a sliver of field on the outside.
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: field.leadingAnchor, constant: pad),
-            stack.trailingAnchor.constraint(equalTo: field.trailingAnchor, constant: -pad),
+            stack.leadingAnchor.constraint(equalTo: field.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: field.trailingAnchor),
             stack.topAnchor.constraint(equalTo: field.topAnchor),
             stack.bottomAnchor.constraint(equalTo: field.bottomAnchor),
         ])
