@@ -51,10 +51,10 @@ public struct RegionSelection: Equatable {
     public enum Handle: CaseIterable {
         case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left
 
-        var movesLeft: Bool { self == .topLeft || self == .left || self == .bottomLeft }
-        var movesRight: Bool { self == .topRight || self == .right || self == .bottomRight }
-        var movesTop: Bool { self == .topLeft || self == .top || self == .topRight }
-        var movesBottom: Bool { self == .bottomLeft || self == .bottom || self == .bottomRight }
+        public var movesLeft: Bool { self == .topLeft || self == .left || self == .bottomLeft }
+        public var movesRight: Bool { self == .topRight || self == .right || self == .bottomRight }
+        public var movesTop: Bool { self == .topLeft || self == .top || self == .topRight }
+        public var movesBottom: Bool { self == .bottomLeft || self == .bottom || self == .bottomRight }
     }
 
     /// The center of `handle` in bounds space (bottom-left origin), for drawing

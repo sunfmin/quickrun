@@ -10,6 +10,8 @@ import Foundation
 /// untested. Resolving the click in one pure place turns that priority into a
 /// table-driven test.
 public enum EditorInteraction: Equatable {
+    /// Drag a handle of the selected (resizable) mark to change its frame.
+    case resizeMark(UUID, RegionSelection.Handle)
     /// Drag a region edge or corner to resize the Capture.
     case resizeRegion(RegionSelection.Handle)
     /// Look up the Recognized word at this index into the supplied word rects.
@@ -29,25 +31,34 @@ public enum EditorInteraction: Equatable {
 
     /// Resolve a click on a committed region. Priority, highest first:
     ///
-    /// 1. a resize handle (Select tool) — so an edge near a word or mark stays grabbable;
-    /// 2. a Recognized word (Select tool) — looked up before it can start a mark;
-    /// 3. an existing mark (Select tool), topmost first — selected and moved;
-    /// 4. empty space inside the region (Select tool) — moves the whole region;
-    /// 5. otherwise the active tool acts — text places a label, emoji stamps a
+    /// 1. a handle of the selected resizable mark (Select tool) — the active
+    ///    object's own handles win over the region's beneath them;
+    /// 2. a region resize handle (Select tool) — so an edge near a word or mark stays grabbable;
+    /// 3. a Recognized word (Select tool) — looked up before it can start a mark;
+    /// 4. an existing mark (Select tool), topmost first — selected and moved;
+    /// 5. empty space inside the region (Select tool) — moves the whole region;
+    /// 6. otherwise the active tool acts — text places a label, emoji stamps a
     ///    glyph, a drawing tool draws.
     ///
     /// `wordRects` are the clickable Recognized-word hit areas in region space,
     /// passed only when words are clickable (they are not while a drawing tool is
-    /// active). `marks` are hit-tested last-on-top.
+    /// active). `marks` are hit-tested last-on-top. `selectedMark` is the currently
+    /// selected object, whose resize handles are tested first when it is resizable.
     public static func resolve(
         tool: MarkupTool,
         point: CGPoint,
         region: RegionSelection,
         handleTolerance: CGFloat,
         wordRects: [CGRect],
-        marks: [MarkupObject]
+        marks: [MarkupObject],
+        selectedMark: MarkupObject? = nil
     ) -> EditorInteraction {
         if tool == .select {
+            if let mark = selectedMark, mark.isResizable,
+               let handle = RegionSelection(bounds: region.bounds, rect: mark.bounds)
+                   .handle(at: point, tolerance: handleTolerance) {
+                return .resizeMark(mark.id, handle)
+            }
             if let handle = region.handle(at: point, tolerance: handleTolerance) {
                 return .resizeRegion(handle)
             }

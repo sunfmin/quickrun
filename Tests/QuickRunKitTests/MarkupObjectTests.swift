@@ -93,4 +93,33 @@ final class MarkupObjectTests: XCTestCase {
         let bounds = object(.ellipse(CGRect(x: 10, y: 10, width: 10, height: 10)), lineWidth: 4).bounds
         XCTAssertEqual(bounds, CGRect(x: 8, y: 8, width: 14, height: 14))
     }
+
+    // MARK: - resized(to:)
+
+    func testTextResizesKeepingStringAndFontSize() {
+        let original = MarkupObject(kind: .text("hi", CGRect(x: 0, y: 0, width: 10, height: 10)),
+                                    style: MarkupStyle(fontSize: 28))
+        let resized = original.resized(to: CGRect(x: 4, y: 5, width: 60, height: 40))
+        // The frame changes; the string and the font size are untouched.
+        XCTAssertEqual(resized.kind, .text("hi", CGRect(x: 4, y: 5, width: 60, height: 40)))
+        XCTAssertEqual(resized.style.fontSize, 28)
+    }
+
+    func testResizeNormalizesNegativeSize() {
+        let resized = object(.rectangle(.zero)).resized(to: CGRect(x: 10, y: 10, width: -6, height: -4))
+        XCTAssertEqual(resized.kind, .rectangle(CGRect(x: 4, y: 6, width: 6, height: 4)))
+    }
+
+    func testPointBasedKindsAreUnchangedByResize() {
+        let arrow = object(.arrow(from: .zero, to: CGPoint(x: 10, y: 10)))
+        XCTAssertEqual(arrow.resized(to: CGRect(x: 1, y: 1, width: 50, height: 50)).kind, arrow.kind)
+    }
+
+    // MARK: - isResizable
+
+    func testOnlyTextIsResizable() {
+        XCTAssertTrue(object(.text("hi", CGRect(x: 0, y: 0, width: 10, height: 10))).isResizable)
+        XCTAssertFalse(object(.emoji("🔥", CGRect(x: 0, y: 0, width: 10, height: 10))).isResizable)
+        XCTAssertFalse(object(.rectangle(CGRect(x: 0, y: 0, width: 10, height: 10))).isResizable)
+    }
 }

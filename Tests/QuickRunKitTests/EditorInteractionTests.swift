@@ -14,14 +14,20 @@ final class EditorInteractionTests: XCTestCase {
         tool: MarkupTool = .select,
         at point: CGPoint,
         words: [CGRect] = [],
-        marks: [MarkupObject] = []
+        marks: [MarkupObject] = [],
+        selectedMark: MarkupObject? = nil
     ) -> EditorInteraction {
         EditorInteraction.resolve(tool: tool, point: point, region: region,
-                                  handleTolerance: 12, wordRects: words, marks: marks)
+                                  handleTolerance: 12, wordRects: words, marks: marks,
+                                  selectedMark: selectedMark)
     }
 
     private func mark(_ rect: CGRect) -> MarkupObject {
         MarkupObject(kind: .rectangle(rect), style: MarkupStyle(lineWidth: 0))
+    }
+
+    private func textMark(_ rect: CGRect) -> MarkupObject {
+        MarkupObject(kind: .text("hi", rect), style: MarkupStyle(lineWidth: 0))
     }
 
     // MARK: - Handle wins over everything beneath it (the overlap case)
@@ -33,6 +39,36 @@ final class EditorInteractionTests: XCTestCase {
         let onCorner = CGRect(x: 190, y: 490, width: 20, height: 20)
         let result = resolve(at: corner, words: [onCorner], marks: [mark(onCorner)])
         XCTAssertEqual(result, .resizeRegion(.topLeft))
+    }
+
+    // MARK: - A selected text label's resize handles
+
+    func testSelectedTextHandleResizesIt() {
+        let text = textMark(CGRect(x: 350, y: 320, width: 100, height: 80))
+        // The top-left corner of the text frame, with the label selected.
+        let result = resolve(at: CGPoint(x: 350, y: 400), marks: [text], selectedMark: text)
+        XCTAssertEqual(result, .resizeMark(text.id, .topLeft))
+    }
+
+    func testSelectedTextHandleBeatsRegionHandleBeneathIt() {
+        // The label's bottom-left handle sits exactly on the region's own corner
+        // handle (200, 200); the selected label's handle must still win.
+        let text = textMark(CGRect(x: 200, y: 200, width: 100, height: 80))
+        XCTAssertEqual(resolve(at: CGPoint(x: 200, y: 200), marks: [text], selectedMark: text),
+                       .resizeMark(text.id, .bottomLeft))
+    }
+
+    func testTextHandleIgnoredWhenLabelNotSelected() {
+        // Same corner, but nothing is selected: there are no handles to grab, so
+        // the click is just empty interior space and moves the region.
+        let text = textMark(CGRect(x: 350, y: 320, width: 100, height: 80))
+        XCTAssertEqual(resolve(at: CGPoint(x: 350, y: 400), marks: [text]), .moveRegion)
+    }
+
+    func testNonTextSelectionHasNoResizeHandles() {
+        // A selected rectangle is not resizable, so its corner stays plain interior.
+        let box = mark(CGRect(x: 350, y: 320, width: 100, height: 80))
+        XCTAssertEqual(resolve(at: CGPoint(x: 350, y: 400), marks: [box], selectedMark: box), .moveRegion)
     }
 
     // MARK: - Word beats a mark beneath it

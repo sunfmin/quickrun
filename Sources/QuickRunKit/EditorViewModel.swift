@@ -107,6 +107,14 @@ public final class EditorViewModel {
         document.move(id: id, by: offset)
     }
 
+    /// Resize the selected object's frame to `rect`. For a text label this changes
+    /// only the box the text wraps into; the font size is unchanged.
+    public func resizeSelection(to rect: CGRect) {
+        guard let id = selectedObjectID,
+              let object = document.objects.first(where: { $0.id == id }) else { return }
+        document.update(object.resized(to: rect))
+    }
+
     /// Apply `style` to the selection if there is one, and remember it as the
     /// style for future objects.
     public func setStyle(_ style: MarkupStyle) {

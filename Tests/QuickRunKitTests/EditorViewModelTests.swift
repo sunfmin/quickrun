@@ -105,6 +105,21 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(vm.document.objects.first?.kind, .rectangle(CGRect(x: 4, y: 6, width: 10, height: 10)))
     }
 
+    func testResizeSelectionReframesTheTextLabel() {
+        let vm = EditorViewModel()
+        vm.addObject(MarkupObject(kind: .text("hi", CGRect(x: 0, y: 0, width: 10, height: 10))))
+        vm.resizeSelection(to: CGRect(x: 0, y: 0, width: 80, height: 30))
+        XCTAssertEqual(vm.document.objects.first?.kind, .text("hi", CGRect(x: 0, y: 0, width: 80, height: 30)))
+    }
+
+    func testResizeSelectionWithNoSelectionDoesNothing() {
+        let vm = EditorViewModel()
+        vm.addObject(rect(0, 0, 10, 10))
+        vm.select(objectID: nil)
+        vm.resizeSelection(to: CGRect(x: 0, y: 0, width: 99, height: 99))
+        XCTAssertEqual(vm.document.objects.first?.kind, .rectangle(CGRect(x: 0, y: 0, width: 10, height: 10)))
+    }
+
     func testSetStyleRestylesSelectionAndSetsDefault() {
         let vm = EditorViewModel()
         vm.addObject(rect(0, 0, 10, 10))

@@ -83,6 +83,7 @@ final class CaptureOverlayController: NSObject {
         view.onCommitMark = { [weak self] kind in self?.commitMark(kind) }
         view.onSelectMark = { [weak self] id in self?.viewModel.select(objectID: id); self?.refresh() }
         view.onMoveMark = { [weak self] id, offset in self?.moveMark(id, by: offset) }
+        view.onResizeMark = { [weak self] id, rect in self?.resizeMark(id, to: rect) }
         view.onUndo = { [weak self] in self?.viewModel.undo(); self?.refresh() }
         view.onRedo = { [weak self] in self?.viewModel.redo(); self?.refresh() }
         view.onDeleteSelection = { [weak self] in self?.viewModel.deleteSelection(); self?.refresh() }
@@ -197,6 +198,12 @@ final class CaptureOverlayController: NSObject {
     private func moveMark(_ id: UUID, by offset: CGSize) {
         viewModel.select(objectID: id)
         viewModel.moveSelection(by: offset)
+        refresh()
+    }
+
+    private func resizeMark(_ id: UUID, to rect: CGRect) {
+        viewModel.select(objectID: id)
+        viewModel.resizeSelection(to: rect)
         refresh()
     }
 
@@ -584,6 +591,9 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     private var regionMoveOrigin: CGRect?
     private static let handleTolerance: CGFloat = 12
     private static let handleSize: CGFloat = 8
+    // A resized text label never collapses below this, so it stays grabbable.
+    private static let minTextWidth: CGFloat = 24
+    private static let minTextHeight: CGFloat = 16
 
     // Markup-drag state (post-commit).
     private var markDragStart: CGPoint?
@@ -591,6 +601,10 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     private var pendingKind: MarkupObject.Kind?
     private var movingID: UUID?
     private var moveOffset: CGSize = .zero
+    // Text-label resize state (Select tool, a resizable mark selected).
+    private var resizingMarkID: UUID?
+    private var resizingMarkHandle: RegionSelection.Handle?
+    private var liveMarkRect: CGRect?
     private var textField: NSTextField?
     private var textOriginView: CGPoint?
 
@@ -601,6 +615,8 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     var onCommitMark: ((MarkupObject.Kind) -> Void)?
     var onSelectMark: ((UUID?) -> Void)?
     var onMoveMark: ((UUID, CGSize) -> Void)?
+    /// A selected text label was resized — replace its frame in the document.
+    var onResizeMark: ((UUID, CGRect) -> Void)?
     var onUndo: (() -> Void)?
     var onRedo: (() -> Void)?
     var onDeleteSelection: (() -> Void)?
@@ -674,7 +690,7 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
                 NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4).fill()
             }
             for object in objects {
-                MarkupDrawing.draw(object.id == movingID ? object.translated(by: moveOffset) : object, image: frozenImage)
+                MarkupDrawing.draw(displayObject(object), image: frozenImage)
             }
             if let pendingKind {
                 MarkupDrawing.draw(MarkupObject(kind: pendingKind, style: activeStyle), image: frozenImage)
@@ -695,11 +711,21 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         }
 
         if let selected = objects.first(where: { $0.id == selectedID }) {
-            let shown = selected.id == movingID ? selected.translated(by: moveOffset) : selected
+            let shown = displayObject(selected)
             drawSelectionHandles(around: shown.bounds)
+            // A resizable label (text) also wears the region's grab squares.
+            if selected.isResizable, tool == .select { drawRegionHandles(shown.bounds) }
         }
 
         if !isMarkupActive { drawHint() }
+    }
+
+    /// The object as it should render right now: translated while being moved,
+    /// re-framed while being resized, otherwise exactly as stored.
+    private func displayObject(_ object: MarkupObject) -> MarkupObject {
+        if object.id == movingID { return object.translated(by: moveOffset) }
+        if object.id == resizingMarkID, let rect = liveMarkRect { return object.resized(to: rect) }
+        return object
     }
 
     private func drawSelectionHandles(around rect: CGRect) {
@@ -729,6 +755,13 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         committedRect.map { RegionSelection(bounds: bounds, rect: $0) }
     }
 
+    /// The resize handle of the selected resizable mark under `point`, if any —
+    /// mirrors the resolver's first-priority check so the cursor matches the click.
+    private func selectedMarkHandle(at point: CGPoint) -> RegionSelection.Handle? {
+        guard let mark = objects.first(where: { $0.id == selectedID }), mark.isResizable else { return nil }
+        return RegionSelection(bounds: bounds, rect: mark.bounds).handle(at: point, tolerance: Self.handleTolerance)
+    }
+
     private func drawHint() {
         let text = "Drag to select an area"
         let attributes: [NSAttributedString.Key: Any] = [
@@ -754,7 +787,9 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         }
         // Cursor reads the affordance under the pointer: resize on a handle, a
         // grab hand inside the region, a finger over a word.
-        if tool == .select, committedSelection?.handle(at: point, tolerance: Self.handleTolerance) != nil {
+        if tool == .select, selectedMarkHandle(at: point) != nil {
+            NSCursor.crosshair.set()
+        } else if tool == .select, committedSelection?.handle(at: point, tolerance: Self.handleTolerance) != nil {
             NSCursor.crosshair.set()
         } else if index != nil {
             NSCursor.pointingHand.set()
@@ -785,8 +820,13 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
             tool: tool, point: point, region: region,
             handleTolerance: Self.handleTolerance,
             wordRects: wordsAreClickable ? words.map(\.rect) : [],
-            marks: objects
+            marks: objects,
+            selectedMark: objects.first { $0.id == selectedID }
         ) {
+        case .resizeMark(let id, let handle):
+            resizingMarkID = id
+            resizingMarkHandle = handle
+            liveMarkRect = objects.first { $0.id == id }?.bounds
         case .resizeRegion(let handle):
             resizingHandle = handle
             words = [] // boxes are stale until OCR re-runs for the new region
@@ -820,6 +860,17 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if let handle = resizingMarkHandle, let id = resizingMarkID,
+           let object = objects.first(where: { $0.id == id }) {
+            // Resize from the stored frame each time (objects don't mutate until
+            // mouseUp), so the dragged edge tracks the cursor smoothly. The raw
+            // dragged rect is then reflowed so the box always hugs the text.
+            let original = object.bounds
+            let raw = RegionSelection(bounds: bounds, rect: original).resized(handle, to: point).rect
+            liveMarkRect = fittedTextRect(object, raw: raw, original: original, handle: handle)
+            needsDisplay = true
+            return
+        }
         if let handle = resizingHandle, let rect = committedRect {
             apply(RegionSelection(bounds: bounds, rect: rect).resized(handle, to: point))
             return
@@ -838,6 +889,14 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let id = resizingMarkID {
+            if let rect = liveMarkRect { onResizeMark?(id, rect) }
+            resizingMarkID = nil
+            resizingMarkHandle = nil
+            liveMarkRect = nil
+            needsDisplay = true
+            return
+        }
         if resizingHandle != nil || movingRegion {
             resizingHandle = nil
             movingRegion = false
@@ -956,13 +1015,38 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         field.drawsBackground = true
         field.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.85)
         field.focusRingType = .none
+        // Single line that grows instead of scrolling: at a large font size a
+        // fixed-width box hides everything past its right edge, so we resize the
+        // field to the typed text on every keystroke (controlTextDidChange).
+        field.usesSingleLineMode = true
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
         field.delegate = self
-        let height = max(24, activeStyle.fontSize * 1.4)
-        field.frame = CGRect(x: point.x, y: point.y, width: 220, height: height)
+        field.frame = CGRect(origin: point, size: textFieldSize(for: ""))
         addSubview(field)
         window?.makeFirstResponder(field)
         textField = field
         textOriginView = point
+    }
+
+    /// Grow the open text field to fit what's been typed. The origin (bottom-left,
+    /// where the user clicked) stays put, so the box expands rightward and the text
+    /// is always visible — never clipped or scrolled out of view.
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = textField else { return }
+        field.setFrameSize(textFieldSize(for: field.stringValue))
+    }
+
+    /// The size the text field needs to show `string` at the active font size,
+    /// with a minimum so an empty field stays visible and clickable.
+    private func textFieldSize(for string: String) -> CGSize {
+        let font = NSFont.boldSystemFont(ofSize: activeStyle.fontSize)
+        let measured = (string as NSString).size(withAttributes: [.font: font])
+        let padding = max(12, activeStyle.fontSize * 0.6) // room for the caret + cell insets
+        let minWidth = max(80, activeStyle.fontSize * 3)
+        let width = max(minWidth, ceil(measured.width) + padding)
+        let height = max(24, activeStyle.fontSize * 1.4)
+        return CGSize(width: width, height: height)
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
@@ -984,6 +1068,72 @@ final class CaptureOverlayView: NSView, NSTextFieldDelegate {
         }
         // Placing (or abandoning) a label returns to the pointer (Select) tool.
         onFinishedText?()
+    }
+
+    // MARK: - Text resize (reflow)
+
+    /// Reflow a text label as the user drags one of its handles. A horizontal
+    /// drag (left/right edge or a corner) sets the wrap width and the height
+    /// shrinks to hug the wrapped text; a vertical drag (top/bottom edge) treats
+    /// the dragged height as a target and solves for the width that fills it. The
+    /// box always tightly bounds the text — there's never empty margin — and the
+    /// font size is left alone.
+    private func fittedTextRect(_ object: MarkupObject, raw: CGRect, original: CGRect,
+                                handle: RegionSelection.Handle) -> CGRect {
+        guard case .text(let string, _) = object.kind else { return raw }
+        let font = NSFont.boldSystemFont(ofSize: object.style.fontSize)
+        let floor = max(Self.minTextWidth, minWrapWidth(string, font: font))
+
+        if handle.movesLeft || handle.movesRight {
+            // Width drag: lock the dragged width, fit the height. The edge the user
+            // is NOT dragging stays pinned.
+            let width = max(floor, raw.width)
+            let height = max(Self.minTextHeight, textHeight(string, font: font, width: width))
+            let x = handle.movesLeft ? original.maxX - width : original.minX
+            return CGRect(x: x, y: original.maxY - height, width: width, height: height)
+        }
+        // Height drag: find the width whose wrapped text fills the dragged height.
+        let width = wrapWidth(string, font: font, targetHeight: raw.height, floor: floor)
+        let height = max(Self.minTextHeight, textHeight(string, font: font, width: width))
+        let y = handle.movesTop ? original.minY : original.maxY - height
+        return CGRect(x: original.minX, y: y, width: width, height: height)
+    }
+
+    /// The height the wrapped text occupies at `width` (bold system font).
+    private func textHeight(_ string: String, font: NSFont, width: CGFloat) -> CGFloat {
+        let box = (string as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font])
+        return ceil(box.height)
+    }
+
+    /// The narrowest the box may get before a line overflows — the width of the
+    /// longest unbreakable run. Forcing a 1pt wrap width makes the layout engine
+    /// wrap as hard as it can (between words for Latin, between characters for CJK
+    /// and other space-less scripts); the width it actually uses is that longest
+    /// run. Word-splitting on spaces would wrongly treat space-less text as one
+    /// giant token, pinning the floor at the full single-line width — which is why
+    /// Chinese labels couldn't be narrowed (and so couldn't wrap) at all.
+    private func minWrapWidth(_ string: String, font: NSFont) -> CGFloat {
+        let box = (string as NSString).boundingRect(
+            with: CGSize(width: 1, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font])
+        return ceil(box.width)
+    }
+
+    /// The narrowest width whose wrapped height stays within `targetHeight`, so a
+    /// taller drag yields a narrower box (more lines) and a shorter drag a wider
+    /// one. Bounded below by `floor` and above by the single-line width.
+    private func wrapWidth(_ string: String, font: NSFont, targetHeight: CGFloat, floor: CGFloat) -> CGFloat {
+        let singleLine = ceil((string as NSString).size(withAttributes: [.font: font]).width)
+        var lo = floor, hi = max(floor, singleLine) // height is non-increasing in width
+        for _ in 0..<20 {
+            let mid = (lo + hi) / 2
+            if textHeight(string, font: font, width: mid) <= targetHeight { hi = mid } else { lo = mid }
+        }
+        return hi
     }
 
     // MARK: - Keyboard

@@ -93,6 +93,32 @@ public struct MarkupObject: Equatable, Identifiable {
         return copy
     }
 
+    /// A copy with its frame replaced, used when the user drags a resize handle.
+    /// Only the rect-framed kinds carry a single frame to set; point-based kinds
+    /// (arrow, freehand, highlight) have no such frame and are returned unchanged.
+    /// For text the font size is untouched — the label simply reflows into `rect`.
+    public func resized(to rect: CGRect) -> MarkupObject {
+        var copy = self
+        let frame = rect.standardized
+        switch kind {
+        case .rectangle: copy.kind = .rectangle(frame)
+        case .ellipse: copy.kind = .ellipse(frame)
+        case .text(let string, _): copy.kind = .text(string, frame)
+        case .emoji(let string, _): copy.kind = .emoji(string, frame)
+        case .blur: copy.kind = .blur(frame)
+        case .arrow, .freehand, .highlight: break
+        }
+        return copy
+    }
+
+    /// Whether the Editor offers resize handles for this mark. Text labels only
+    /// for now: dragging a handle changes the frame the text wraps into, leaving
+    /// the font size alone. Other kinds are moved or redrawn, not frame-resized.
+    public var isResizable: Bool {
+        if case .text = kind { return true }
+        return false
+    }
+
     /// Axis-aligned bounds in capture space, for hit-testing and selection.
     /// Stroked kinds are outset by half the line width so thin marks stay easy
     /// to click.
