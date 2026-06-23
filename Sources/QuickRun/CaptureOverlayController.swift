@@ -49,6 +49,12 @@ final class CaptureOverlayController: NSObject {
 
     var onClosed: (() -> Void)?
 
+    /// An always-present close affordance, pinned top-right. The editing toolbar —
+    /// which carries the only other Cancel — appears only once a region is
+    /// committed, so without this the user has no visible way out of a freshly
+    /// summoned overlay (Esc aside). Tapping it dismisses the capture.
+    private lazy var closeButton: NSButton = makeCloseButton()
+
     init(frozen: FrozenDisplay, saveLocation: SaveLocationStore) {
         self.frozen = frozen
         self.saveLocation = saveLocation
@@ -68,6 +74,8 @@ final class CaptureOverlayController: NSObject {
         window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         window.contentView = view
+        view.addSubview(closeButton)
+        positionCloseButton()
 
         view.onRegionCommitted = { [weak self] rect in self?.regionCommitted(rect) }
         view.onCancel = { [weak self] in self?.close() }
@@ -87,6 +95,35 @@ final class CaptureOverlayController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(view)
+    }
+
+    /// A circular ✕ on a dim disc, legible over any frozen content. Pinned to the
+    /// top-right so it never collides with the region the user drags out below.
+    private func makeCloseButton() -> NSButton {
+        let button = NSButton(frame: NSRect(x: 0, y: 0, width: 34, height: 34))
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.imagePosition = .imageOnly
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 17
+        button.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        button.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")?
+            .withSymbolConfiguration(config)
+        button.contentTintColor = .white
+        button.target = self
+        button.action = #selector(cancelTapped)
+        button.toolTip = "Close (Esc)"
+        return button
+    }
+
+    private func positionCloseButton() {
+        let margin: CGFloat = 18
+        let size = closeButton.frame.size
+        closeButton.autoresizingMask = [.minXMargin, .minYMargin] // stay top-right
+        closeButton.setFrameOrigin(NSPoint(
+            x: view.bounds.width - size.width - margin,
+            y: view.bounds.height - size.height - margin))
     }
 
     /// Host a looked-up word's Panel above the overlay. The overlay sits at the

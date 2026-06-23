@@ -8,6 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: PanelController?
     private var overlay: CaptureOverlayController?
     private var captureMenuItem: NSMenuItem?
+    /// True between asking to freeze the display and the overlay appearing, so a
+    /// burst of hotkey presses can't start a second freeze before the first shows.
+    private var isPresentingCapture = false
 
     private let store = UserDefaultsSourceStore(defaults: .standard)
     private let hotkeyStore = HotkeyStore(defaults: .standard)
@@ -30,14 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Source(name: "Google", urlTemplate: "https://www.google.com/search?q={q}"),
     ]
 
-    // Accessibility first; fall back to a simulated copy + clipboard read.
-    private lazy var capturer: SelectionCapturer = ChainedSelectionCapturer([
-        AXSelectionCapturer(reader: SystemAccessibilityReader()),
-        ClipboardSelectionCapturer(
-            pasteboard: SystemPasteboard(),
-            copy: SystemCopy.copySelection
-        ),
-    ])
+    // Read the Selection through the Accessibility API only. We deliberately do
+    // NOT fall back to a synthetic ⌘C: that speculative keystroke leaked stray
+    // characters (a "C") into terminals (Ghostty) and Electron apps (Slack) when
+    // nothing was selected — and those same apps already expose their selection
+    // via AX when there *is* one, so the copy never actually helped. When AX can't
+    // read a selection we treat it as "nothing selected" (→ screen capture).
+    private lazy var capturer: SelectionCapturer = AXSelectionCapturer(reader: SystemAccessibilityReader())
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store.seedIfEmpty(defaultSources)
@@ -128,9 +130,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.lookUpSelectionInActiveWebView()
             return
         }
+        // A capture overlay already owns the whole screen. Re-pressing the hotkey
+        // must not stack a second frozen layer on top — that pile is exactly what
+        // trapped the user. Esc or the overlay's close button is the way out.
+        if overlay != nil { return }
         // The pure router decides the destination: nothing usable selected means
         // capture a screen region; otherwise open the Panel on the trimmed Query.
-        switch LookupRouter.route(selection: capturer.capture()) {
+        let outcome = capturer.capture()
+        switch LookupRouter.route(selection: outcome.selection) {
         case .capture:
             startCapture()
         case .panel(let query):
@@ -150,8 +157,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             presentScreenRecordingNeeded()
             return
         }
+        // One overlay at a time. The `overlay != nil` check in trigger() covers an
+        // overlay that's already up; this flag closes the async gap while the
+        // display freezes, so mashing the hotkey can't raise two stacked overlays.
+        guard overlay == nil, !isPresentingCapture else { return }
+        isPresentingCapture = true
         DisplayFreezer.freezeDisplayUnderCursor { [weak self] frozen in
-            guard let self, let frozen else { return }
+            guard let self else { return }
+            self.isPresentingCapture = false
+            guard let frozen else { return }
             let overlay = CaptureOverlayController(frozen: frozen, saveLocation: self.saveLocationStore)
             overlay.onClosed = { [weak self] in self?.overlay = nil }
             overlay.onLookUpWord = { [weak self] word in self?.lookUp(word) }

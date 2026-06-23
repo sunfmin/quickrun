@@ -12,93 +12,111 @@ final class FakePasteboard: PasteboardAccess {
     init(string: String? = nil) { self.string = string }
 }
 
-/// Stub capturer returning a fixed result and counting invocations.
+/// Stub capturer returning a fixed outcome and counting invocations.
 final class StubCapturer: SelectionCapturer {
-    let result: String?
+    let result: CaptureOutcome
     private(set) var callCount = 0
 
-    init(_ result: String?) { self.result = result }
+    init(_ result: CaptureOutcome) { self.result = result }
 
-    func capture() -> String? {
+    func capture() -> CaptureOutcome {
         callCount += 1
         return result
     }
 }
 
-/// Fake Accessibility reader returning a fixed selected text.
+/// Fake Accessibility reader returning a fixed answer.
 final class FakeAXReader: AccessibilitySelectionReading {
-    let text: String?
-    init(_ text: String?) { self.text = text }
-    func selectedText() -> String? { text }
+    let answer: AXSelection
+    init(_ answer: AXSelection) { self.answer = answer }
+    func read() -> AXSelection { answer }
 }
 
 final class ClipboardSelectionCapturerTests: XCTestCase {
     func testCaptureReturnsCopiedSelection() {
         let pb = FakePasteboard()
         let capturer = ClipboardSelectionCapturer(pasteboard: pb) { pb.string = "hello" }
-        XCTAssertEqual(capturer.capture(), "hello")
+        XCTAssertEqual(capturer.capture(), .selected("hello"))
     }
 
     func testCaptureTrimsWhitespace() {
         let pb = FakePasteboard()
         let capturer = ClipboardSelectionCapturer(pasteboard: pb) { pb.string = "  spaced \n" }
-        XCTAssertEqual(capturer.capture(), "spaced")
+        XCTAssertEqual(capturer.capture(), .selected("spaced"))
     }
 
-    func testEmptySelectionYieldsNil() {
+    func testEmptySelectionYieldsEmpty() {
         let pb = FakePasteboard()
         let capturer = ClipboardSelectionCapturer(pasteboard: pb) { pb.string = "   \n" }
-        XCTAssertNil(capturer.capture())
+        XCTAssertEqual(capturer.capture(), .empty)
     }
 
     func testRestoresPreviousClipboardContents() {
         let pb = FakePasteboard()
         pb.string = "user had this"
         let capturer = ClipboardSelectionCapturer(pasteboard: pb) { pb.string = "selected" }
-        XCTAssertEqual(capturer.capture(), "selected")
+        XCTAssertEqual(capturer.capture(), .selected("selected"))
         XCTAssertEqual(pb.string, "user had this")
     }
 
-    func testCopyThatChangesNothingYieldsNilAndLeavesClipboard() {
+    func testCopyThatChangesNothingYieldsEmptyAndLeavesClipboard() {
         let pb = FakePasteboard()
         pb.string = "user had this"
         let capturer = ClipboardSelectionCapturer(pasteboard: pb) { /* nothing copied */ }
-        XCTAssertNil(capturer.capture())
+        XCTAssertEqual(capturer.capture(), .empty)
         XCTAssertEqual(pb.string, "user had this")
     }
 }
 
 final class AXSelectionCapturerTests: XCTestCase {
     func testReturnsTrimmedSelectedText() {
-        let capturer = AXSelectionCapturer(reader: FakeAXReader(" hello \n"))
-        XCTAssertEqual(capturer.capture(), "hello")
+        let capturer = AXSelectionCapturer(reader: FakeAXReader(.text(" hello \n")))
+        XCTAssertEqual(capturer.capture(), .selected("hello"))
     }
 
-    func testEmptyOrNilYieldsNil() {
-        XCTAssertNil(AXSelectionCapturer(reader: FakeAXReader(nil)).capture())
-        XCTAssertNil(AXSelectionCapturer(reader: FakeAXReader("  ")).capture())
+    /// A focused element that reports an empty selection is a *definite* empty —
+    /// the key distinction that lets the chain skip the clipboard ⌘C.
+    func testEmptyAXSelectionIsDefiniteEmpty() {
+        XCTAssertEqual(AXSelectionCapturer(reader: FakeAXReader(.text("  "))).capture(), .empty)
+        XCTAssertEqual(AXSelectionCapturer(reader: FakeAXReader(.text(""))).capture(), .empty)
+    }
+
+    /// AX that can't read at all stays undetermined, so a fallback may run.
+    func testUnavailableAXIsUndetermined() {
+        XCTAssertEqual(AXSelectionCapturer(reader: FakeAXReader(.unavailable)).capture(), .undetermined)
     }
 }
 
 final class ChainedSelectionCapturerTests: XCTestCase {
-    func testFirstNonNilWinsAndShortCircuits() {
-        let first = StubCapturer("from AX")
-        let second = StubCapturer("from clipboard")
+    func testFirstSelectedWinsAndShortCircuits() {
+        let first = StubCapturer(.selected("from AX"))
+        let second = StubCapturer(.selected("from clipboard"))
         let chained = ChainedSelectionCapturer([first, second])
-        XCTAssertEqual(chained.capture(), "from AX")
+        XCTAssertEqual(chained.capture(), .selected("from AX"))
         XCTAssertEqual(second.callCount, 0, "fallback must not run when AX succeeds")
     }
 
-    func testFallsBackWhenFirstIsNil() {
-        let first = StubCapturer(nil)
-        let second = StubCapturer("from clipboard")
+    func testFallsBackWhenFirstIsUndetermined() {
+        let first = StubCapturer(.undetermined)
+        let second = StubCapturer(.selected("from clipboard"))
         let chained = ChainedSelectionCapturer([first, second])
-        XCTAssertEqual(chained.capture(), "from clipboard")
+        XCTAssertEqual(chained.capture(), .selected("from clipboard"))
         XCTAssertEqual(first.callCount, 1)
     }
 
-    func testAllNilYieldsNil() {
-        let chained = ChainedSelectionCapturer([StubCapturer(nil), StubCapturer(nil)])
-        XCTAssertNil(chained.capture())
+    /// The regression test for the stray-"C" bug: a definite empty from AX must
+    /// STOP the chain, never triggering the clipboard's speculative ⌘C.
+    func testDefiniteEmptyStopsBeforeClipboardFallback() {
+        let ax = StubCapturer(.empty)
+        let clipboard = StubCapturer(.selected("should never run"))
+        let chained = ChainedSelectionCapturer([ax, clipboard])
+        XCTAssertEqual(chained.capture(), .empty)
+        XCTAssertEqual(clipboard.callCount, 0,
+                       "a definite empty from AX must NOT fire the clipboard ⌘C fallback")
+    }
+
+    func testAllUndeterminedYieldsUndetermined() {
+        let chained = ChainedSelectionCapturer([StubCapturer(.undetermined), StubCapturer(.undetermined)])
+        XCTAssertEqual(chained.capture(), .undetermined)
     }
 }
