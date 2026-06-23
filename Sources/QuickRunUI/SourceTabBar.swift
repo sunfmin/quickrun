@@ -36,6 +36,9 @@ public final class SourceTabBar: NSView {
 
     public private(set) var selectedIndex = 0
 
+    /// The number of Source tabs currently shown.
+    public var count: Int { buttons.count }
+
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         underline.wantsLayer = true

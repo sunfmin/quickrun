@@ -199,11 +199,11 @@ public final class WidthDotButton: NSButton {
 
 /// The editor toolbar's content — the segmented tool row plus the ink/width strip —
 /// built once from `ToolbarStyle` + `StylePresets`. The live capture overlay
-/// (`CaptureOverlayController`) and the offscreen snapshot (`ToolbarSnapshot`) both
-/// build *this* tree, so there is a single layout definition instead of a hand-
-/// mirrored copy that drifts. Each caller supplies its own chrome around `view` (a
-/// live `NSPanel` + `NSVisualEffectView`, or a flat snapshot card) and wires actions
-/// onto the returned handles — `NSVisualEffectView` blur is the one thing that cannot
+/// (`CaptureOverlayController`) builds *this* tree and wires it; the offscreen
+/// snapshot drives that same overlay, so there is a single layout definition instead
+/// of a hand-mirrored copy that drifts. The overlay supplies its own chrome around
+/// `view` (a live `NSPanel` + `NSVisualEffectView`); the snapshot renders the same
+/// `view` on a flat card — `NSVisualEffectView` blur is the one thing that cannot
 /// render offscreen, so the chrome is the only part that legitimately differs.
 public struct EditorToolbarContent {
     /// The non-tool buttons, keyed so a caller can wire each to its action (or leave

@@ -169,8 +169,15 @@ final class CaptureOverlayController: NSObject {
         view.tool = viewModel.currentTool
         view.activeStyle = viewModel.defaultStyle
         view.currentEmoji = viewModel.currentEmoji
+        syncToolbarSelection()
+    }
+
+    /// Reflect the view model's current tool and default style onto the toolbar:
+    /// the held tool wears its chip, and the swatch / width dot matching the style
+    /// is ringed. Split out from `refresh()` (which also syncs the canvas) so the
+    /// snapshot can drive this from the real `EditorViewModel` without a canvas.
+    private func syncToolbarSelection() {
         for (tool, button) in toolButtons { button.isActive = tool == viewModel.currentTool }
-        // Ring the swatch and width dot that match the active style.
         let style = viewModel.defaultStyle
         for swatch in swatchButtons { swatch.isSelectedSwatch = swatch.color == style.stroke }
         for dot in widthButtons { dot.isSelectedWidth = dot.width == style.lineWidth }
@@ -384,35 +391,12 @@ final class CaptureOverlayController: NSObject {
 
     // MARK: - Toolbar chrome
 
-    private func buildToolbar() {
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: Self.toolbarHeight),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.isFloatingPanel = true
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.hidesOnDeactivate = false
-        panel.isReleasedWhenClosed = false
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-
-        let bar = NSVisualEffectView()
-        bar.material = .menu
-        bar.blendingMode = .behindWindow
-        bar.state = .active
-        bar.wantsLayer = true
-        bar.layer?.cornerRadius = ToolbarStyle.cornerRadius
-        bar.layer?.masksToBounds = true
-        bar.layer?.borderWidth = 0.5
-        bar.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.4).cgColor
-        bar.translatesAutoresizingMaskIntoConstraints = false
-
-        // Build the shared content tree (segmented tool row + ink/width strip), then
-        // wire its handles to this controller's actions and keep them for state sync.
-        // `ToolbarSnapshot` builds the same tree for offscreen review.
+    /// Build the shared editor-toolbar tree, wire its handles to this controller's
+    /// actions, keep them for state sync, and reflect the current tool/style. Used by
+    /// the live `buildToolbar()` and by `SnapshotTests` (which poses the view model,
+    /// then renders the returned `view` on a flat card — only the `NSVisualEffectView`
+    /// blur, the one thing that can't render offscreen, differs).
+    func makeEditorToolbarContent() -> EditorToolbarContent {
         let content = EditorToolbarContent.build()
         toolButtons = content.toolButtons
         swatchButtons = content.swatchButtons
@@ -445,8 +429,46 @@ final class CaptureOverlayController: NSObject {
             dot.target = self
             dot.action = #selector(widthTapped(_:))
         }
+        syncToolbarSelection()
+        return content
+    }
 
-        let column = content.view
+    /// Pose the real view model so `makeEditorToolbarContent` reflects a held tool and
+    /// a selected ink/width — the snapshot's data seam.
+    func configureForSnapshot(tool: MarkupTool, style: MarkupStyle) {
+        viewModel.selectTool(tool)
+        viewModel.setStyle(style)
+    }
+
+    private func buildToolbar() {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: Self.toolbarHeight),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+
+        let bar = NSVisualEffectView()
+        bar.material = .menu
+        bar.blendingMode = .behindWindow
+        bar.state = .active
+        bar.wantsLayer = true
+        bar.layer?.cornerRadius = ToolbarStyle.cornerRadius
+        bar.layer?.masksToBounds = true
+        bar.layer?.borderWidth = 0.5
+        bar.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.4).cgColor
+        bar.translatesAutoresizingMaskIntoConstraints = false
+
+        // Build the shared content tree (segmented tool row + ink/width strip), wired
+        // to this controller's actions and state-synced from the view model.
+        let column = makeEditorToolbarContent().view
         bar.addSubview(column)
         panel.contentView = bar
         NSLayoutConstraint.activate([

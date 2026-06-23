@@ -4,10 +4,10 @@ import AppKit
 /// Query field, a gear, the Source tab bar, and a single closing hairline — above a
 /// content region where results render.
 ///
-/// Built here so the live Panel (`PanelController`) and the offscreen snapshot
-/// (`PanelSnapshot`) lay out the *identical* chrome from one source — no
-/// hand-mirrored copy to keep in sync. Only the content region differs: the live
-/// Panel fills it with `WKWebView`s, the snapshot drops in a static result pane.
+/// Built here so the live Panel (`PanelController`) lays out its chrome from one
+/// source. The offscreen snapshot drives that same controller, so only the content
+/// region differs: the live Panel fills it with `WKWebView`s, the snapshot drops in
+/// a static result pane (the one thing that can't render offscreen).
 public struct PanelChrome {
     /// The material-backed panel body; becomes the window's `contentView`.
     public let content: NSVisualEffectView

@@ -3,9 +3,10 @@ import XCTest
 import QuickRunKit
 @testable import QuickRunUI
 
-/// Renders the *real* editor toolbar component (no hand-mirrored copy) under test,
-/// both structurally (the segment groups are wired correctly) and visually (the
-/// offscreen snapshot actually produces light + dark PNGs).
+/// Structural checks on the *real* editor toolbar component (no hand-mirrored copy):
+/// the segment groups are wired correctly and the destructive tint is set. The
+/// offscreen rendering of this bar lives in `ToolbarSnapshotTests`, which drives the
+/// live `CaptureOverlayController`.
 final class EditorToolbarTests: XCTestCase {
     override func setUp() {
         super.setUp()
@@ -43,26 +44,5 @@ final class EditorToolbarTests: XCTestCase {
         content.toolButtons[.freehand]?.isActive = true
         XCTAssertEqual(content.toolButtons[.freehand]?.isActive, true)
         XCTAssertEqual(content.toolButtons[.select]?.isActive, false)
-    }
-
-    func testSnapshotRendersLightAndDarkPNGs() throws {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("quickrun-toolbar-snapshot-test", isDirectory: true)
-        try? FileManager.default.removeItem(at: dir)
-
-        ToolbarSnapshot.render(toDirectory: dir.path)
-
-        for name in ["toolbar-editor-light", "toolbar-editor-dark",
-                     "toolbar-scroll-light", "toolbar-scroll-dark"] {
-            let url = dir.appendingPathComponent("\(name).png")
-            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "missing \(name).png")
-            let image = NSImage(contentsOf: url)
-            XCTAssertNotNil(image, "\(name).png did not decode")
-            // A non-empty bar, rendered @2x — wide and short.
-            XCTAssertGreaterThan(image?.size.width ?? 0, 200, "\(name).png is too narrow to be the bar")
-            XCTAssertGreaterThan(image?.size.height ?? 0, 20, "\(name).png is too short to be the bar")
-        }
-
-        try? FileManager.default.removeItem(at: dir)
     }
 }

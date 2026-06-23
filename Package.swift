@@ -33,5 +33,10 @@ let package = Package(
             dependencies: ["QuickRunUI"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "QuickRunAppTests",
+            dependencies: ["QuickRun"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

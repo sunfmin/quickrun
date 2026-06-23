@@ -5,37 +5,56 @@ import QuickRunUI
 /// Settings window: a table of Sources (name + URL template) with add / remove /
 /// move, persisted through the SourceStore. A URL template missing the `{q}`
 /// placeholder is rejected on commit.
+///
+/// Design: each section is a dictionary *masthead* — a New York serif entry-word
+/// over a short seal-red rule, the same "ink label over a red rule" motif the Panel
+/// uses for its active Source. The rules do the structuring, so no full-width
+/// divider is needed between sections. URL templates are set in a monospaced face
+/// because each is an editable pattern with a `{q}` slot, not running prose.
 final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private let store: UserDefaultsSourceStore
     private let hotkeyStore: HotkeyStore
     private let saveLocationStore: SaveLocationStore
     private let defaultHotkey: Hotkey
     private let onHotkeyChanged: () -> Void
+    /// The accessibility check, injected so a snapshot can render a deterministic
+    /// state; defaults to the real system check.
+    private let isAccessibilityGranted: () -> Bool
     private var sources: [Source]
     private let window: NSWindow
-    private let tableView = NSTableView()
-    private let hotkeyButton = NSButton()
-    private let grantButton = NSButton()
     private var recordMonitor: Any?
     private var libraryPicker: SourceLibraryPickerController?
-    private let permissionLabel = NSTextField(labelWithString: "")
-    private let saveLocationLabel = NSTextField(labelWithString: "")
+
+    // Controls the rest of the controller (and snapshot tests) read or update.
+    let tableView = NSTableView()
+    let hotkeyButton = NSButton()
+    let grantButton = NSButton()
+    let permissionLabel = NSTextField(labelWithString: "")
+    let saveLocationLabel = NSTextField(labelWithString: "")
 
     private static let nameColumn = NSUserInterfaceItemIdentifier("name")
     private static let urlColumn = NSUserInterfaceItemIdentifier("url")
+
+    // The General block's label / value grid, and the Sources name column.
+    private static let labelX: CGFloat = 20
+    private static let labelW: CGFloat = 150
+    private static let valueX: CGFloat = 182
+    private static let nameColumnWidth: CGFloat = 150
 
     init(
         store: UserDefaultsSourceStore,
         hotkeyStore: HotkeyStore,
         saveLocationStore: SaveLocationStore,
         defaultHotkey: Hotkey,
-        onHotkeyChanged: @escaping () -> Void
+        onHotkeyChanged: @escaping () -> Void,
+        isAccessibilityGranted: @escaping () -> Bool = { AccessibilityPermission.isGranted }
     ) {
         self.store = store
         self.hotkeyStore = hotkeyStore
         self.saveLocationStore = saveLocationStore
         self.defaultHotkey = defaultHotkey
         self.onHotkeyChanged = onHotkeyChanged
+        self.isAccessibilityGranted = isAccessibilityGranted
         self.sources = store.load()
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 520),
@@ -60,6 +79,10 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// The fully built, store-populated content view — driven offscreen by
+    /// `SettingsSnapshot` so the snapshot reviews the real window, not a copy.
+    var contentViewForTesting: NSView? { window.contentView }
+
     // MARK: - UI
 
     private func buildUI() {
@@ -67,15 +90,11 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         content.autoresizingMask = [.width, .height]
 
         // ── General ──────────────────────────────────────────────────────────
-        content.addSubview(sectionHeader("General", y: 480))
+        addSectionHeader("General", y: 480, to: content)
 
-        let hotkeyLabel = NSTextField(labelWithString: "Global hotkey")
-        hotkeyLabel.font = .systemFont(ofSize: 13)
-        hotkeyLabel.frame = NSRect(x: 20, y: 448, width: 110, height: 22)
-        hotkeyLabel.autoresizingMask = [.minYMargin]
-        content.addSubview(hotkeyLabel)
+        content.addSubview(rowLabel("Global hotkey", y: 448))
 
-        hotkeyButton.frame = NSRect(x: 140, y: 444, width: 170, height: 26)
+        hotkeyButton.frame = NSRect(x: Self.valueX, y: 444, width: 96, height: 26)
         hotkeyButton.autoresizingMask = [.minYMargin]
         hotkeyButton.bezelStyle = .rounded
         hotkeyButton.target = self
@@ -83,15 +102,11 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         updateHotkeyButtonTitle()
         content.addSubview(hotkeyButton)
 
-        content.addSubview(caption("Click, then press the new combination.", x: 142, y: 424, width: 420))
+        content.addSubview(caption("Click, then press the new combination.", x: Self.valueX + 2, y: 424, width: 420))
 
-        let accessibilityLabel = NSTextField(labelWithString: "Accessibility")
-        accessibilityLabel.font = .systemFont(ofSize: 13)
-        accessibilityLabel.frame = NSRect(x: 20, y: 392, width: 110, height: 22)
-        accessibilityLabel.autoresizingMask = [.minYMargin]
-        content.addSubview(accessibilityLabel)
+        content.addSubview(rowLabel("Accessibility", y: 392))
 
-        permissionLabel.frame = NSRect(x: 142, y: 392, width: 210, height: 22)
+        permissionLabel.frame = NSRect(x: Self.valueX, y: 392, width: 168, height: 22)
         permissionLabel.autoresizingMask = [.minYMargin]
         content.addSubview(permissionLabel)
 
@@ -104,16 +119,12 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         content.addSubview(grantButton)
         updatePermissionStatus()
 
-        let saveLabel = NSTextField(labelWithString: "Save screenshots to")
-        saveLabel.font = .systemFont(ofSize: 13)
-        saveLabel.frame = NSRect(x: 20, y: 356, width: 150, height: 22)
-        saveLabel.autoresizingMask = [.minYMargin]
-        content.addSubview(saveLabel)
+        content.addSubview(rowLabel("Save screenshots to", y: 356))
 
         saveLocationLabel.font = .systemFont(ofSize: 12)
         saveLocationLabel.textColor = .secondaryLabelColor
         saveLocationLabel.lineBreakMode = .byTruncatingMiddle
-        saveLocationLabel.frame = NSRect(x: 176, y: 357, width: 250, height: 20)
+        saveLocationLabel.frame = NSRect(x: Self.valueX, y: 357, width: 250, height: 20)
         saveLocationLabel.autoresizingMask = [.minYMargin]
         content.addSubview(saveLocationLabel)
 
@@ -127,13 +138,8 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         content.addSubview(chooseButton)
         updateSaveLocationLabel()
 
-        let divider = DynamicLayerView(frame: NSRect(x: 20, y: 336, width: 560, height: 1))
-        divider.fillColor = .separatorColor
-        divider.autoresizingMask = [.width, .minYMargin]
-        content.addSubview(divider)
-
         // ── Sources ──────────────────────────────────────────────────────────
-        content.addSubview(sectionHeader("Sources", y: 304))
+        addSectionHeader("Sources", y: 304, to: content)
         content.addSubview(caption("Each Source opens in its own tab. {q} is replaced with your selection.", x: 20, y: 282, width: 560))
 
         let listBox = DynamicLayerView(frame: NSRect(x: 20, y: 54, width: 560, height: 216))
@@ -143,7 +149,14 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         listBox.fillColor = .textBackgroundColor
         listBox.autoresizingMask = [.width, .height]
 
-        let scroll = NSScrollView(frame: listBox.bounds)
+        // A quiet custom column header replaces the default NSTableHeaderView (which
+        // renders as an opaque bar offscreen and reads heavier than this list wants).
+        let headerHeight: CGFloat = 26
+        let header = columnHeader(width: listBox.bounds.width, height: headerHeight)
+        header.frame = NSRect(x: 0, y: listBox.bounds.height - headerHeight, width: listBox.bounds.width, height: headerHeight)
+        header.autoresizingMask = [.width, .minYMargin]
+
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: listBox.bounds.width, height: listBox.bounds.height - headerHeight))
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         scroll.borderType = .noBorder
@@ -151,20 +164,22 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
 
         let nameCol = NSTableColumn(identifier: Self.nameColumn)
         nameCol.title = "Name"
-        nameCol.width = 150
+        nameCol.width = Self.nameColumnWidth
         let urlCol = NSTableColumn(identifier: Self.urlColumn)
         urlCol.title = "URL template"
         urlCol.width = 390
         tableView.addTableColumn(nameCol)
         tableView.addTableColumn(urlCol)
+        tableView.headerView = nil // the custom strip above stands in for it
         tableView.dataSource = self
         tableView.delegate = self
         tableView.style = .fullWidth
         tableView.usesAlternatingRowBackgroundColors = false
         tableView.backgroundColor = .clear
-        tableView.rowHeight = 28
+        tableView.rowHeight = 30
         scroll.documentView = tableView
         listBox.addSubview(scroll)
+        listBox.addSubview(header)
         content.addSubview(listBox)
 
         let toolbar = NSSegmentedControl()
@@ -201,13 +216,34 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         tableView.reloadData()
     }
 
-    private func sectionHeader(_ title: String, y: CGFloat) -> NSTextField {
+    // MARK: - Section chrome
+
+    /// A dictionary masthead: a serif entry-word with a short seal-red rule beneath,
+    /// the same "ink label over a red rule" motif as the Panel's active Source.
+    private func addSectionHeader(_ title: String, y: CGFloat, to content: NSView) {
         let header = NSTextField(labelWithString: title)
         header.font = .quickRunSerif(ofSize: 15, weight: .semibold)
         header.textColor = .labelColor
-        header.frame = NSRect(x: 20, y: y, width: 300, height: 22)
+        header.sizeToFit()
+        let textWidth = header.frame.width
+        header.frame = NSRect(x: Self.labelX, y: y, width: textWidth, height: header.frame.height)
         header.autoresizingMask = [.minYMargin]
-        return header
+        content.addSubview(header)
+
+        let rule = NSView(frame: NSRect(x: Self.labelX, y: y - 5, width: max(textWidth, 24), height: 2))
+        rule.wantsLayer = true
+        rule.layer?.backgroundColor = Palette.accent.cgColor
+        rule.layer?.cornerRadius = 1
+        rule.autoresizingMask = [.minYMargin]
+        content.addSubview(rule)
+    }
+
+    private func rowLabel(_ text: String, y: CGFloat) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 13)
+        label.frame = NSRect(x: Self.labelX, y: y, width: Self.labelW, height: 22)
+        label.autoresizingMask = [.minYMargin]
+        return label
     }
 
     private func caption(_ text: String, x: CGFloat, y: CGFloat, width: CGFloat) -> NSTextField {
@@ -216,6 +252,38 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
         label.textColor = .secondaryLabelColor
         label.frame = NSRect(x: x, y: y, width: width, height: 16)
         label.autoresizingMask = [.minYMargin]
+        return label
+    }
+
+    /// The Sources list's quiet column header: two tracked captions over a closing
+    /// hairline, aligned to the Name / URL columns.
+    private func columnHeader(width: CGFloat, height: CGFloat) -> NSView {
+        let strip = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+
+        let name = columnCaption("NAME")
+        name.frame = NSRect(x: 10, y: (height - 14) / 2, width: Self.nameColumnWidth, height: 14)
+        name.autoresizingMask = [.minYMargin]
+        strip.addSubview(name)
+
+        let url = columnCaption("URL TEMPLATE")
+        url.frame = NSRect(x: Self.nameColumnWidth + 24, y: (height - 14) / 2, width: 300, height: 14)
+        url.autoresizingMask = [.minYMargin]
+        strip.addSubview(url)
+
+        let hairline = DynamicLayerView(frame: NSRect(x: 0, y: 0, width: width, height: 1))
+        hairline.fillColor = .separatorColor
+        hairline.autoresizingMask = [.width, .maxYMargin]
+        strip.addSubview(hairline)
+        return strip
+    }
+
+    private func columnCaption(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.attributedStringValue = NSAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+            .kern: 0.8,
+        ])
         return label
     }
 
@@ -252,16 +320,25 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard let id = tableColumn?.identifier else { return nil }
+        let isURL = (id == Self.urlColumn)
         let field = (tableView.makeView(withIdentifier: id, owner: self) as? NSTextField) ?? {
             let f = NSTextField()
             f.identifier = id
             f.isBordered = false
             f.drawsBackground = false
             f.delegate = self
+            // One line, truncated — a long template scrolls only while being edited,
+            // never wraps into the next row. The name is the row's headword (medium);
+            // the URL is a monospaced editable pattern, not prose.
+            f.usesSingleLineMode = true
+            f.lineBreakMode = .byTruncatingTail
+            f.cell?.truncatesLastVisibleLine = true
+            f.font = isURL ? .monospacedSystemFont(ofSize: 12, weight: .regular) : .systemFont(ofSize: 13, weight: .medium)
+            f.textColor = isURL ? .secondaryLabelColor : .labelColor
             return f
         }()
         let source = sources[row]
-        field.stringValue = (id == Self.nameColumn) ? source.name : source.urlTemplate
+        field.stringValue = isURL ? source.urlTemplate : source.name
         return field
     }
 
@@ -335,7 +412,7 @@ final class SettingsWindowController: NSObject, NSTableViewDataSource, NSTableVi
     // MARK: - Permission
 
     private func updatePermissionStatus() {
-        let granted = AccessibilityPermission.isGranted
+        let granted = isAccessibilityGranted()
         permissionLabel.stringValue = granted ? "Granted ✓" : "Not granted — required"
         permissionLabel.textColor = granted ? .secondaryLabelColor : .systemRed
         grantButton.isHidden = granted

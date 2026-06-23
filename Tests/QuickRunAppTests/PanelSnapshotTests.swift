@@ -1,17 +1,16 @@
 import AppKit
 import XCTest
-@testable import QuickRunUI
+@testable import QuickRun
 
-/// Renders the *real* Panel chrome (the masthead built by `PanelChrome`, no
-/// hand-mirrored copy) over a mocked dictionary result, and checks the offscreen
-/// snapshot actually produces light + dark PNGs of the look-up results window.
+/// Renders the *real* Panel masthead (driven by `PanelController.configureForSnapshot`,
+/// not a hand-posed copy) over a mocked dictionary result, and checks both that the
+/// offscreen snapshot produces light + dark PNGs and that the example look-up flowed
+/// through the real `PanelViewModel` into the chrome.
 ///
-/// Set `QUICKRUN_SNAPSHOT_DIR` to dump the PNGs there for visual review (a design
-/// pass); unset, it renders to a temp dir and cleans up.
+/// Set `QUICKRUN_SNAPSHOT_DIR` to dump the PNGs there for visual review.
 final class PanelSnapshotTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        // AppKit view rendering needs an initialised application object even offscreen.
         _ = NSApplication.shared
     }
 
@@ -33,11 +32,19 @@ final class PanelSnapshotTests: XCTestCase {
             XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "missing \(name).png")
             let image = NSImage(contentsOf: url)
             XCTAssertNotNil(image, "\(name).png did not decode")
-            // The full panel window, rendered @2x — wide and tall.
             XCTAssertGreaterThan(image?.size.width ?? 0, 600, "\(name).png is too narrow to be the panel")
             XCTAssertGreaterThan(image?.size.height ?? 0, 400, "\(name).png is too short to be the panel")
         }
 
         if keep == nil { try? FileManager.default.removeItem(at: dir) }
+    }
+
+    /// The example look-up reaches the masthead through the real controller — the
+    /// view model projected the Query onto the field and configured one tab per Source.
+    func testRealControllerProjectsTheLookUp() {
+        let (_, controller) = PanelSnapshot.pose(appearance: NSAppearance(named: .aqua)!)
+        XCTAssertEqual(controller.queryField.stringValue, "ephemeral")
+        XCTAssertEqual(controller.tabBar.count, PanelSnapshot.exampleSources.count)
+        XCTAssertEqual(controller.tabBar.selectedIndex, 0)
     }
 }

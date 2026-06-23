@@ -30,6 +30,7 @@ final class ScrollPreviewPane: NSObject {
     private let panel: NSPanel
     private let imageView: NSImageView
     private var controls: NSPanel!
+    private var controlsRow: NSStackView?
     private var controlsSize: NSSize = .zero
 
     /// The current stitched image — copied/saved as-is when the user finalizes.
@@ -148,20 +149,8 @@ final class ScrollPreviewPane: NSObject {
     // MARK: - Controls (floating pill, styled like the Editor toolbar)
 
     private func buildControls() {
-        // Monochrome line icons like the Editor's actions; only Cancel carries a
-        // restrained red, so the pill reads calm.
-        let copy = iconButton("doc.on.clipboard", "Copy to clipboard", #selector(copyTapped), tint: .secondaryLabelColor)
-        let save = iconButton("square.and.arrow.down", "Save to folder", #selector(saveTapped), tint: .secondaryLabelColor)
-        let cancel = iconButton("xmark", "Cancel", #selector(cancelTapped), tint: ToolbarStyle.destructive)
-
-        let separator = divider()
-        let row = NSStackView(views: [copy, save, separator, cancel])
-        row.orientation = .horizontal
-        row.spacing = ToolbarStyle.rowSpacing
-        row.setCustomSpacing(14, after: save)
-        row.setCustomSpacing(14, after: separator)
-        row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
-        row.translatesAutoresizingMaskIntoConstraints = false
+        let row = makeControlsRow()
+        controlsRow = row
 
         let bar = NSVisualEffectView()
         bar.material = .menu
@@ -194,6 +183,31 @@ final class ScrollPreviewPane: NSObject {
         controls = panel
         controlsSize = panel.frame.size
     }
+
+    /// The pill's action row — Copy and Save (which double as "done"), a divider, and
+    /// a brick-red Cancel. Built here so the live pill and `SnapshotTests` lay out the
+    /// identical row instead of a hand-mirrored copy.
+    private func makeControlsRow() -> NSStackView {
+        // Monochrome line icons like the Editor's actions; only Cancel carries a
+        // restrained red, so the pill reads calm.
+        let copy = iconButton("doc.on.clipboard", "Copy to clipboard", #selector(copyTapped), tint: .secondaryLabelColor)
+        let save = iconButton("square.and.arrow.down", "Save to folder", #selector(saveTapped), tint: .secondaryLabelColor)
+        let cancel = iconButton("xmark", "Cancel", #selector(cancelTapped), tint: ToolbarStyle.destructive)
+
+        let separator = divider()
+        let row = NSStackView(views: [copy, save, separator, cancel])
+        row.orientation = .horizontal
+        row.spacing = ToolbarStyle.rowSpacing
+        row.setCustomSpacing(14, after: save)
+        row.setCustomSpacing(14, after: separator)
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }
+
+    /// The action row, for offscreen rendering on a flat card (the pill's
+    /// `NSVisualEffectView` blur can't render offscreen).
+    var snapshotControlsRow: NSView? { controlsRow }
 
     private func iconButton(_ symbol: String, _ tooltip: String, _ action: Selector, tint: NSColor) -> NSButton {
         let button = NSButton()

@@ -15,9 +15,9 @@ import QuickRunUI
 /// dismisses on Esc or click-away, and restores focus to the prior app.
 final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private let panel: NSPanel
-    private let queryField: NSTextField
+    let queryField: NSTextField
     private let settingsButton: NSButton
-    private let tabBar: SourceTabBar
+    let tabBar: SourceTabBar
     private let webContainer: NSView
 
     /// Called when the masthead's gear is clicked — the Panel's only in-window
@@ -117,8 +117,7 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
         previousApp = NSWorkspace.shared.frontmostApplication
 
         let request = viewModel?.open(selection: selection)
-        renderQuery()
-        tabBar.select(viewModel?.activeIndex ?? 0, animated: false)
+        projectChrome()
         showActiveWebView()
         if let request { execute(request) }
 
@@ -153,6 +152,27 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     /// screen (which sits at the shield level, above ordinary floating windows).
     var hostWindow: NSWindow { panel }
 
+    // MARK: - Snapshot seam
+
+    /// Seed the real masthead for `sources` and `selection` — building the actual
+    /// `PanelViewModel` and projecting it onto the chrome — without creating the
+    /// offscreen-incapable `WKWebView`s or showing the window. Drives the live code
+    /// path for `SnapshotTests`; the caller drops a static result pane into
+    /// `snapshotContentRegion` to stand in for the loaded page.
+    func configureForSnapshot(sources: [Source], selection: String) {
+        makeViewModelAndTabs(for: sources)
+        _ = viewModel?.open(selection: selection)
+        projectChrome()
+    }
+
+    /// The masthead content view (the `NSVisualEffectView` body), for offscreen
+    /// rendering after `configureForSnapshot`.
+    var snapshotContentView: NSView? { panel.contentView }
+
+    /// The results region, where the live Panel hosts its `WKWebView`s — a snapshot
+    /// fills it with a static stand-in instead.
+    var snapshotContentRegion: NSView { webContainer }
+
     /// Look up whatever text is selected inside the active web view (used when the
     /// hotkey fires while QuickRun is already frontmost). Reads the selection via
     /// JavaScript — no synthetic copy — so it can't beep or pick up the wrong text.
@@ -179,7 +199,7 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private func setupIfNeeded(for sources: [Source]) {
         if let vm = viewModel, vm.sources == sources { return }
 
-        viewModel = PanelViewModel(sources: sources)
+        makeViewModelAndTabs(for: sources)
 
         webViews.forEach { $0.removeFromSuperview() }
         webViews = sources.map { _ in
@@ -196,8 +216,22 @@ final class PanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
             webContainer.addSubview(webView)
             return webView
         }
+    }
 
+    /// The data → chrome half of setup: the view model and the Source tab bar.
+    /// Split out from web-view creation so a snapshot can drive the real chrome
+    /// without instantiating `WKWebView`s (which can't render offscreen).
+    private func makeViewModelAndTabs(for sources: [Source]) {
+        viewModel = PanelViewModel(sources: sources)
         tabBar.configure(sources.map(\.name))
+    }
+
+    /// Project the view model's Query and active Source onto the masthead — the
+    /// shared "model owns it, chrome shows it" step run by both `present` and the
+    /// offscreen snapshot.
+    private func projectChrome() {
+        renderQuery()
+        tabBar.select(viewModel?.activeIndex ?? 0, animated: false)
     }
 
     // MARK: - Actions
